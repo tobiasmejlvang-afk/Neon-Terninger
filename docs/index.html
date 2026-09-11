@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta name="theme-color" content="#120812">
-  <meta name="description" content="Neon Terninger – et sensuelt terningespil med dine egne tekster, billeder og kombinationer.">
+  <meta name="description" content="Neon Terninger – et sensuelt terningespil med egne tekster, billeder, spiltilstande og intensitetsniveauer.">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <title>Neon Terninger</title>
@@ -12,7 +12,9 @@
   <link rel="apple-touch-icon" href="./icon-192.png">
   <link rel="manifest" href="./manifest.webmanifest">
   <link rel="stylesheet" href="./style.css">
+  <link rel="stylesheet" href="./modes.css">
   <script src="./app.js" defer></script>
+  <script src="./modes.js" defer></script>
 </head>
 <body>
   <div class="ambient ambient-a" aria-hidden="true"></div><div class="ambient ambient-b" aria-hidden="true"></div>
@@ -59,6 +61,6 @@
     </form>
   </dialog>
 
-  <dialog id="help" aria-labelledby="help-title"><div class="dialog-heading"><div><span class="eyebrow">GODT AT VIDE</span><h2 id="help-title">Klar til at spille</h2></div><button class="icon-button" id="close-help" aria-label="Luk hjælp">×</button></div><ol class="help-steps"><li>Vælg mellem <strong>1 og 4 terninger</strong>.</li><li>Tryk <strong>Rediger terninger</strong>. Hver side kan indeholde tekst, billede eller begge dele.</li><li>Ved billedupload bliver billedet automatisk skaleret og komprimeret, så appen forbliver hurtig.</li><li>Tryk på den glødende knap for at slå. Du kan vælge en bestemt terning i venstre side.</li><li><strong>Ny runde</strong> rydder kun resultaterne. Dine personlige terninger beholdes.</li></ol><div class="install-note"><h3>Som app på din tablet</h3><p><strong>iPad:</strong> Åbn i Safari, tryk Del, og vælg Føj til hjemmeskærm.</p><p><strong>Android:</strong> Åbn i Chrome, tryk ⋮, og vælg Føj til startskærm eller Installer app.</p></div><p class="muted">Tekster og billeder gemmes lokalt i browseren og synkroniseres ikke. Rydder du browserens webstedsdata, slettes de. Appen kan bruges offline efter første indlæsning.</p></dialog>
+  <dialog id="help" aria-labelledby="help-title"><div class="dialog-heading"><div><span class="eyebrow">GODT AT VIDE</span><h2 id="help-title">Klar til at spille</h2></div><button class="icon-button" id="close-help" aria-label="Luk hjælp">×</button></div><ol class="help-steps"><li>Vælg en <strong>spiltilstand</strong>: Romantisk, Flirtende, Vovet eller After Dark. Den indlæser fire færdige terninger.</li><li>Vælg mellem <strong>1 og 4 aktive terninger</strong>.</li><li>Tryk <strong>Rediger terninger</strong>. Hver side kan indeholde tekst, billede eller begge dele.</li><li>Ved billedupload bliver billedet automatisk skaleret og komprimeret, så appen forbliver hurtig.</li><li>Tryk på den glødende knap for at slå. Du kan vælge en bestemt terning i venstre side.</li><li><strong>Ny runde</strong> rydder kun resultaterne. Dine personlige terninger beholdes.</li></ol><div class="install-note"><h3>Jeres regler først</h3><p>Alle udfordringer er frivillige. Spring over, byt eller rediger en side, hvis den ikke passer til jer.</p></div><div class="install-note"><h3>Som app på din tablet</h3><p><strong>iPad:</strong> Åbn i Safari, tryk Del, og vælg Føj til hjemmeskærm.</p><p><strong>Android:</strong> Åbn i Chrome, tryk ⋮, og vælg Føj til startskærm eller Installer app.</p></div><p class="muted">Tekster og billeder gemmes lokalt i browseren og synkroniseres ikke. Rydder du browserens webstedsdata, slettes de. Appen kan bruges offline efter første indlæsning.</p></dialog>
 </body>
 </html>
