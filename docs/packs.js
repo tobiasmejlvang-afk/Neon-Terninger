@@ -1,122 +1,86 @@
 'use strict';
 (() => {
-  const CONFIG_KEY = 'neon-terninger-v1';
-  const MODE_KEY = 'neon-terninger-mode-v1';
-  const ACTIVE_KEY = 'neon-terninger-active-pack-v1';
-  const PACK_DB = 'neon-terninger-packs-v1';
-  const PACK_STORE = 'packs';
-  const MEDIA_DB = 'neon-terninger-media-v1';
-  const MEDIA_STORE = 'images';
-  const $ = id => document.getElementById(id);
+  const CONFIG_KEY='neon-terninger-v1', MODE_KEY='neon-terninger-mode-v1', ACTIVE_KEY='neon-terninger-active-pack-v1';
+  const PACK_DB='neon-terninger-packs-v1', PACK_STORE='packs', MEDIA_DB='neon-terninger-media-v1', MEDIA_STORE='images';
+  const ICONS=['◇','♥','✦','◆','★','☾','♠','⚡'];
+  const COLORS=['#ff4f9a','#ff315f','#ca65ff','#ff8c69','#e6b85c','#5f8dff','#55c4a5','#d66cff'];
+  const $=id=>document.getElementById(id), clone=v=>JSON.parse(JSON.stringify(v));
+  const readJSON=key=>{try{return JSON.parse(localStorage.getItem(key)||'null');}catch{return null;}};
+  const uid=prefix=>`${prefix}-${crypto.randomUUID?crypto.randomUUID():`${Date.now()}-${Math.random().toString(16).slice(2)}`}`;
+  const req=request=>new Promise((resolve,reject)=>{request.onsuccess=()=>resolve(request.result);request.onerror=()=>reject(request.error||new Error('Lagerfejl'));});
+  const openDB=(name,version,upgrade)=>new Promise((resolve,reject)=>{const r=indexedDB.open(name,version);r.onupgradeneeded=()=>upgrade(r.result);r.onsuccess=()=>resolve(r.result);r.onerror=()=>reject(r.error||new Error('Kunne ikke åbne lokalt lager.'));});
+  const packDB=()=>openDB(PACK_DB,1,db=>{if(!db.objectStoreNames.contains(PACK_STORE))db.createObjectStore(PACK_STORE,{keyPath:'id'});});
+  const mediaDB=()=>openDB(MEDIA_DB,1,db=>{if(!db.objectStoreNames.contains(MEDIA_STORE))db.createObjectStore(MEDIA_STORE);});
+  async function action(dbPromise,storeName,mode,fn){const db=await dbPromise;return req(fn(db.transaction(storeName,mode).objectStore(storeName)));}
+  const packs={all:()=>action(packDB(),PACK_STORE,'readonly',s=>s.getAll()),get:id=>action(packDB(),PACK_STORE,'readonly',s=>s.get(id)),put:p=>action(packDB(),PACK_STORE,'readwrite',s=>s.put(p)),del:id=>action(packDB(),PACK_STORE,'readwrite',s=>s.delete(id))};
+  const media={get:id=>action(mediaDB(),MEDIA_STORE,'readonly',s=>s.get(id)),put:(id,blob)=>action(mediaDB(),MEDIA_STORE,'readwrite',s=>s.put(blob,id))};
+  const defaultMeta=()=>({description:'',icon:'◇',color:COLORS[0],cover:null});
+  const blankConfig=()=>({version:2,count:4,dice:Array.from({length:4},(_,i)=>({name:`Terning ${i+1}`,faces:[{text:'Side 1',imageId:''},{text:'Side 2',imageId:''}]}))});
+  const packMeta=p=>({...defaultMeta(),description:typeof p?.description==='string'?p.description:'',icon:ICONS.includes(p?.icon)?p.icon:'◇',color:COLORS.includes(p?.color)?p.color:COLORS[0],cover:p?.cover instanceof Blob?p.cover:null});
 
-  const readJSON = key => { try { return JSON.parse(localStorage.getItem(key) || 'null'); } catch { return null; } };
-  const clone = value => JSON.parse(JSON.stringify(value));
-  const uid = prefix => `${prefix}-${crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random().toString(16).slice(2)}`}`;
-  const request = req => new Promise((resolve, reject) => { req.onsuccess = () => resolve(req.result); req.onerror = () => reject(req.error || new Error('Lagerfejl')); });
-  const openDB = (name, version, upgrade) => new Promise((resolve, reject) => {
-    const req = indexedDB.open(name, version);
-    req.onupgradeneeded = () => upgrade(req.result);
-    req.onsuccess = () => resolve(req.result);
-    req.onerror = () => reject(req.error || new Error('Kunne ikke åbne lokalt lager.'));
-  });
-  const packDB = () => openDB(PACK_DB, 1, db => { if (!db.objectStoreNames.contains(PACK_STORE)) db.createObjectStore(PACK_STORE, {keyPath:'id'}); });
-  const mediaDB = () => openDB(MEDIA_DB, 1, db => { if (!db.objectStoreNames.contains(MEDIA_STORE)) db.createObjectStore(MEDIA_STORE); });
-  async function storeAction(dbPromise, storeName, mode, fn) {
-    const db = await dbPromise; const tx = db.transaction(storeName, mode); const store = tx.objectStore(storeName); return request(fn(store));
+  async function collectImages(config){const images=[],seen=new Set();for(const die of config.dice)for(const face of die.faces){if(!face.imageId||seen.has(face.imageId))continue;seen.add(face.imageId);const blob=await media.get(face.imageId).catch(()=>null);if(blob)images.push({sourceId:face.imageId,blob});else{face.imageId='';if(!face.text?.trim())face.text='Billede mangler';}}return images;}
+  async function snapshotCurrent(name,existingId=''){
+    const config=readJSON(CONFIG_KEY);if(!config?.dice||config.version!==2)throw new Error('Det aktive terningesæt kunne ikke læses.');
+    const old=existingId?await packs.get(existingId).catch(()=>null):null,savedConfig=clone(config),images=await collectImages(savedConfig),now=Date.now(),meta=packMeta(old);
+    return {id:existingId||uid('pack'),name:name.trim(),...meta,createdAt:old?.createdAt||now,updatedAt:now,config:savedConfig,images};
   }
-  const packs = {
-    all: () => storeAction(packDB(), PACK_STORE, 'readonly', s => s.getAll()),
-    get: id => storeAction(packDB(), PACK_STORE, 'readonly', s => s.get(id)),
-    put: pack => storeAction(packDB(), PACK_STORE, 'readwrite', s => s.put(pack)),
-    del: id => storeAction(packDB(), PACK_STORE, 'readwrite', s => s.delete(id))
-  };
-  const media = {
-    get: id => storeAction(mediaDB(), MEDIA_STORE, 'readonly', s => s.get(id)),
-    put: (id, blob) => storeAction(mediaDB(), MEDIA_STORE, 'readwrite', s => s.put(blob, id))
-  };
-
-  async function snapshotCurrent(name, existingId = '') {
-    const config = readJSON(CONFIG_KEY);
-    if (!config?.dice || config.version !== 2) throw new Error('Det aktive terningesæt kunne ikke læses.');
-    const savedConfig = clone(config); const images = []; const seen = new Set();
-    for (const die of savedConfig.dice) for (const face of die.faces) {
-      if (!face.imageId || seen.has(face.imageId)) continue;
-      seen.add(face.imageId);
-      const blob = await media.get(face.imageId).catch(() => null);
-      if (blob) images.push({sourceId:face.imageId, blob});
-      else { face.imageId = ''; if (!face.text?.trim()) face.text = 'Billede mangler'; }
-    }
-    const old = existingId ? await packs.get(existingId).catch(() => null) : null;
-    const now = Date.now();
-    return {id: existingId || uid('pack'), name:name.trim(), createdAt:old?.createdAt || now, updatedAt:now, config:savedConfig, images};
+  async function saveCurrent(name,existingId=''){const clean=name.trim();if(!clean)throw new Error('Giv pakken et navn.');if(clean.length>40)throw new Error('Navnet må højst være 40 tegn.');const pack=await snapshotCurrent(clean,existingId);await packs.put(pack);localStorage.setItem(ACTIVE_KEY,pack.id);return pack;}
+  async function loadPack(id){
+    const pack=await packs.get(id);if(!pack?.config?.dice)throw new Error('Spilpakken kunne ikke læses.');const config=clone(pack.config),map=new Map();
+    for(const item of pack.images||[]){if(!item?.blob||!item.sourceId)continue;const newId=uid('packimg');await media.put(newId,item.blob);map.set(item.sourceId,newId);}
+    for(const die of config.dice)for(const face of die.faces)if(face.imageId){const replacement=map.get(face.imageId);if(replacement)face.imageId=replacement;else{face.imageId='';if(!face.text?.trim())face.text='Billede mangler';}}
+    localStorage.setItem(CONFIG_KEY,JSON.stringify(config));localStorage.setItem(MODE_KEY,JSON.stringify({id:'custom',name:pack.name,appliedAt:Date.now()}));localStorage.setItem(ACTIVE_KEY,pack.id);location.reload();
   }
-
-  async function saveCurrent(name, existingId = '') {
-    if (!name.trim()) throw new Error('Giv pakken et navn.');
-    if (name.trim().length > 40) throw new Error('Navnet må højst være 40 tegn.');
-    const pack = await snapshotCurrent(name, existingId); await packs.put(pack); localStorage.setItem(ACTIVE_KEY, pack.id); return pack;
+  async function prepareCover(file){
+    if(!file?.type?.startsWith('image/'))throw new Error('Vælg en almindelig billedfil.');if(file.size>20*1024*1024)throw new Error('Coverbilledet er for stort. Maks. 20 MB.');
+    const url=URL.createObjectURL(file);try{const img=new Image();await new Promise((res,rej)=>{img.onload=res;img.onerror=()=>rej(new Error('Coverbilledet kunne ikke læses.'));img.src=url;});const max=1400,scale=Math.min(1,max/Math.max(img.naturalWidth,img.naturalHeight)),canvas=document.createElement('canvas');canvas.width=Math.max(1,Math.round(img.naturalWidth*scale));canvas.height=Math.max(1,Math.round(img.naturalHeight*scale));const ctx=canvas.getContext('2d');ctx.drawImage(img,0,0,canvas.width,canvas.height);const blob=await new Promise(res=>canvas.toBlob(res,'image/webp',.84));if(!blob)throw new Error('Coveret kunne ikke optimeres.');return blob;}finally{URL.revokeObjectURL(url);}
   }
+  const coverURLs=new Set();function coverURL(blob){if(!(blob instanceof Blob))return'';const url=URL.createObjectURL(blob);coverURLs.add(url);return url;}function clearCoverURLs(){coverURLs.forEach(URL.revokeObjectURL);coverURLs.clear();}
+  function fmt(time){try{return new Intl.DateTimeFormat('da-DK',{day:'2-digit',month:'2-digit',year:'numeric'}).format(new Date(time));}catch{return'';}}
+  function flash(text){const n=document.createElement('div');n.className='pack-toast';n.textContent=text;document.body.append(n);requestAnimationFrame(()=>n.classList.add('show'));setTimeout(()=>{n.classList.remove('show');setTimeout(()=>n.remove(),250);},1800);}
 
-  async function loadPack(id) {
-    const pack = await packs.get(id); if (!pack?.config?.dice) throw new Error('Spilpakken kunne ikke læses.');
-    const config = clone(pack.config); const imageMap = new Map();
-    for (const item of pack.images || []) {
-      if (!item?.blob || !item.sourceId) continue;
-      const newId = uid('packimg'); await media.put(newId, item.blob); imageMap.set(item.sourceId, newId);
-    }
-    for (const die of config.dice) for (const face of die.faces) {
-      if (face.imageId) {
-        const replacement = imageMap.get(face.imageId);
-        if (replacement) face.imageId = replacement;
-        else { face.imageId = ''; if (!face.text?.trim()) face.text = 'Billede mangler'; }
-      }
-    }
-    localStorage.setItem(CONFIG_KEY, JSON.stringify(config));
-    localStorage.setItem(MODE_KEY, JSON.stringify({id:'custom', name:pack.name, appliedAt:Date.now()}));
-    localStorage.setItem(ACTIVE_KEY, pack.id); location.reload();
+  let libraryDialog,designerDialog,designer={pack:null,config:null,cover:null,icon:'◇',color:COLORS[0],source:'current'};
+  function buildLibrary(){
+    const d=document.createElement('dialog');d.id='pack-dialog';d.setAttribute('aria-labelledby','pack-title');
+    d.innerHTML=`<div class="dialog-heading"><div><span class="eyebrow">DIT BIBLIOTEK</span><h2 id="pack-title">Spilpakker</h2></div><button class="icon-button" id="close-packs" aria-label="Luk">×</button></div><p class="muted pack-intro">Gem komplette sæt og giv hver pakke sit eget cover, ikon, farve og udtryk.</p><div class="pack-top-actions"><button id="design-pack" class="primary-button" type="button">✦ Design ny pakke</button><span>eller gem de aktive terninger direkte</span></div><section class="pack-save"><div><label class="field-label" for="pack-name">Hurtig gem</label><input id="pack-name" maxlength="40" placeholder="Fx Date Night"></div><button id="save-pack" class="secondary-button" type="button">Gem nuværende sæt</button><div class="pack-suggestions"><button type="button">Date Night</button><button type="button">Weekend</button><button type="button">Hotel</button><button type="button">Vores favoritter</button></div><p id="pack-error" class="form-error"></p></section><div class="pack-list-heading"><div><span class="eyebrow">GEMTE PAKKER</span><strong id="pack-count">0 pakker</strong></div><span class="muted">Lokalt på denne enhed</span></div><div id="pack-list" class="pack-list"></div>`;
+    document.body.append(d);$('close-packs').onclick=()=>d.close();d.addEventListener('click',e=>{if(e.target===d)d.close();});
+    d.querySelectorAll('.pack-suggestions button').forEach(b=>b.onclick=()=>{$('pack-name').value=b.textContent;$('pack-name').focus();});
+    $('design-pack').onclick=()=>openDesigner();$('save-pack').onclick=async()=>{const b=$('save-pack'),error=$('pack-error');error.textContent='';b.disabled=true;try{const saved=await saveCurrent($('pack-name').value);$('pack-name').value='';await renderList();flash(`“${saved.name}” er gemt.`);}catch(e){error.textContent=e.message||'Pakken kunne ikke gemmes.';}finally{b.disabled=false;}};return d;
   }
-
-  function fmt(time) { try { return new Intl.DateTimeFormat('da-DK',{day:'2-digit',month:'2-digit',year:'numeric'}).format(new Date(time)); } catch { return ''; } }
-  function buildDialog() {
-    const dialog = document.createElement('dialog'); dialog.id = 'pack-dialog'; dialog.setAttribute('aria-labelledby','pack-title');
-    dialog.innerHTML = `<div class="dialog-heading"><div><span class="eyebrow">DIT BIBLIOTEK</span><h2 id="pack-title">Spilpakker</h2></div><button class="icon-button" id="close-packs" aria-label="Luk">×</button></div><p class="muted pack-intro">Gem hele jeres nuværende sæt — tekst, antal terninger og billeder — og skift mellem pakker uden at bygge dem igen.</p><section class="pack-save"><div><label class="field-label" for="pack-name">Navn på ny pakke</label><input id="pack-name" maxlength="40" placeholder="Fx Date Night"></div><button id="save-pack" class="primary-button" type="button">Gem nuværende sæt <span>＋</span></button><div class="pack-suggestions" aria-label="Navneforslag"><button type="button">Date Night</button><button type="button">Weekend</button><button type="button">Hotel</button><button type="button">Vores favoritter</button></div><p id="pack-error" class="form-error" role="alert"></p></section><div class="pack-list-heading"><div><span class="eyebrow">GEMTE PAKKER</span><strong id="pack-count">0 pakker</strong></div><span class="muted">Gemmes kun på denne enhed</span></div><div id="pack-list" class="pack-list"></div>`;
-    document.body.append(dialog);
-    $('close-packs').onclick = () => dialog.close();
-    dialog.addEventListener('click', e => { if (e.target === dialog) dialog.close(); });
-    dialog.querySelectorAll('.pack-suggestions button').forEach(button => button.onclick = () => { $('pack-name').value = button.textContent; $('pack-name').focus(); });
-    $('save-pack').onclick = async () => {
-      const button = $('save-pack'); const error = $('pack-error'); error.textContent=''; button.disabled=true;
-      try { const saved = await saveCurrent($('pack-name').value); $('pack-name').value=''; await renderList(); flash(`“${saved.name}” er gemt.`); }
-      catch (e) { error.textContent = e.message || 'Pakken kunne ikke gemmes.'; }
-      finally { button.disabled=false; }
-    };
-    return dialog;
+  function buildDesigner(){
+    const d=document.createElement('dialog');d.id='designer-dialog';d.setAttribute('aria-labelledby','designer-title');
+    d.innerHTML=`<div class="dialog-heading"><div><span class="eyebrow">SPILPAKKE-DESIGNER</span><h2 id="designer-title">Design spilpakke</h2></div><button class="icon-button" id="close-designer" aria-label="Luk">×</button></div><div class="designer-layout"><section class="designer-preview"><div id="designer-cover" class="designer-cover"><span id="designer-cover-icon">◇</span><div><small>NEON TERNINGER</small><strong id="designer-preview-name">Ny spilpakke</strong><p id="designer-preview-desc">Jeres helt eget sæt.</p></div></div><label class="cover-button">＋ Vælg coverbillede<input id="designer-cover-input" type="file" accept="image/*" hidden></label><button id="remove-cover" class="text-button" type="button">Fjern cover</button></section><section class="designer-fields"><label class="field-label" for="designer-name">Navn</label><input id="designer-name" maxlength="40" placeholder="Fx Date Night"><label class="field-label" for="designer-desc">Beskrivelse</label><textarea id="designer-desc" maxlength="140" rows="3" placeholder="Kort beskrivelse af stemningen"></textarea><div class="designer-choice"><span class="field-label">Ikon</span><div id="designer-icons" class="designer-icons"></div></div><div class="designer-choice"><span class="field-label">Farve</span><div id="designer-colors" class="designer-colors"></div></div><div id="designer-source-wrap"><span class="field-label">Start med</span><div class="designer-source"><button data-source="current" type="button">Nuværende sæt</button><button data-source="blank" type="button">Tom pakke</button></div></div><div class="designer-count"><label class="field-label" for="designer-count">Aktive terninger</label><select id="designer-count"><option>1</option><option>2</option><option>3</option><option selected>4</option></select></div></section></div><section class="designer-order"><div><span class="eyebrow">RÆKKEFØLGE</span><h3>Arrangér terningerne</h3></div><div id="designer-dice"></div></section><p id="designer-error" class="form-error"></p><div class="dialog-footer"><button id="cancel-designer" class="secondary-button" type="button">Annuller</button><button id="save-design" class="primary-button" type="button">Gem design <span>✓</span></button></div>`;
+    document.body.append(d);$('close-designer').onclick=$('cancel-designer').onclick=()=>d.close();
+    $('designer-name').oninput=paintDesigner;$('designer-desc').oninput=paintDesigner;$('designer-count').onchange=()=>{designer.config.count=Number($('designer-count').value);paintDesigner();};
+    $('designer-cover-input').onchange=async e=>{try{if(e.target.files[0]){designer.cover=await prepareCover(e.target.files[0]);paintDesigner();}}catch(err){$('designer-error').textContent=err.message;}e.target.value='';};
+    $('remove-cover').onclick=()=>{designer.cover=null;paintDesigner();};
+    d.querySelectorAll('[data-source]').forEach(b=>b.onclick=()=>{designer.source=b.dataset.source;designer.config=designer.source==='blank'?blankConfig():clone(readJSON(CONFIG_KEY)||blankConfig());$('designer-count').value=designer.config.count;paintDesigner();});
+    $('save-design').onclick=saveDesign;return d;
   }
-
-  function flash(text) { const note = document.createElement('div'); note.className='pack-toast'; note.textContent=text; document.body.append(note); requestAnimationFrame(()=>note.classList.add('show')); setTimeout(()=>{note.classList.remove('show');setTimeout(()=>note.remove(),250);},1800); }
-
-  async function renderList() {
-    const list = $('pack-list'); if (!list) return; list.replaceChildren();
-    const active = localStorage.getItem(ACTIVE_KEY); const all = (await packs.all()).sort((a,b)=>b.updatedAt-a.updatedAt);
-    $('pack-count').textContent = `${all.length} ${all.length===1?'pakke':'pakker'}`;
-    if (!all.length) { const empty=document.createElement('div'); empty.className='pack-empty'; empty.innerHTML='<span>◇</span><strong>Ingen gemte pakker endnu</strong><p>Tilpas terningerne, giv sættet et navn ovenfor og gem det som jeres første pakke.</p>'; list.append(empty); return; }
-    all.forEach(pack => {
-      const card=document.createElement('article'); card.className=`pack-card${pack.id===active?' is-active':''}`;
-      const imageCount=(pack.images||[]).length; const sideCount=pack.config.dice.slice(0,pack.config.count).reduce((n,d)=>n+d.faces.length,0);
-      card.innerHTML=`<div class="pack-card-main"><span class="pack-icon">◇</span><div><div class="pack-name-row"><h3></h3>${pack.id===active?'<span>AKTIV</span>':''}</div><p>${pack.config.count} terninger · ${sideCount} sider${imageCount?` · ${imageCount} billeder`:''}</p><small>Opdateret ${fmt(pack.updatedAt)}</small></div></div><div class="pack-card-actions"><button class="pack-load" type="button">Brug pakke</button><button class="pack-more" type="button" aria-label="Flere handlinger">•••</button></div><div class="pack-secondary" hidden><button data-action="update" type="button">Gem nuværende oveni</button><button data-action="rename" type="button">Omdøb</button><button data-action="delete" class="danger" type="button">Slet</button></div>`;
-      card.querySelector('h3').textContent=pack.name;
-      card.querySelector('.pack-load').onclick=async e=>{e.currentTarget.disabled=true;try{await loadPack(pack.id);}catch(err){flash(err.message||'Kunne ikke åbne pakken.');e.currentTarget.disabled=false;}};
-      const secondary=card.querySelector('.pack-secondary'); card.querySelector('.pack-more').onclick=()=>{secondary.hidden=!secondary.hidden;};
-      secondary.querySelector('[data-action="update"]').onclick=async()=>{if(!confirm(`Erstat indholdet i “${pack.name}” med de terninger, der er aktive nu?`))return;try{await saveCurrent(pack.name,pack.id);await renderList();flash('Pakken er opdateret.');}catch(err){flash(err.message||'Kunne ikke opdatere.');}};
-      secondary.querySelector('[data-action="rename"]').onclick=async()=>{const name=prompt('Nyt navn på spilpakken:',pack.name);if(name===null)return;const clean=name.trim();if(!clean||clean.length>40){flash('Navnet skal være 1–40 tegn.');return;}pack.name=clean;pack.updatedAt=Date.now();await packs.put(pack);await renderList();};
-      secondary.querySelector('[data-action="delete"]').onclick=async()=>{if(!confirm(`Slet “${pack.name}”? Det kan ikke fortrydes.`))return;await packs.del(pack.id);if(active===pack.id)localStorage.removeItem(ACTIVE_KEY);await renderList();flash('Pakken er slettet.');};
-      list.append(card);
-    });
+  function paintDesigner(){
+    if(!designerDialog)return;const name=$('designer-name').value.trim()||'Ny spilpakke',desc=$('designer-desc').value.trim()||'Jeres helt eget sæt.',cover=$('designer-cover');clearCoverURLs();cover.style.setProperty('--pack-color',designer.color);cover.style.backgroundImage=designer.cover?`linear-gradient(0deg,#120812bb,#12081222),url("${coverURL(designer.cover)}")`:'';$('designer-cover-icon').textContent=designer.icon;$('designer-preview-name').textContent=name;$('designer-preview-desc').textContent=desc;$('remove-cover').hidden=!designer.cover;
+    $('designer-icons').replaceChildren(...ICONS.map(icon=>{const b=document.createElement('button');b.type='button';b.textContent=icon;b.className=designer.icon===icon?'selected':'';b.onclick=()=>{designer.icon=icon;paintDesigner();};return b;}));
+    $('designer-colors').replaceChildren(...COLORS.map(color=>{const b=document.createElement('button');b.type='button';b.style.background=color;b.className=designer.color===color?'selected':'';b.setAttribute('aria-label',`Vælg farve ${color}`);b.onclick=()=>{designer.color=color;paintDesigner();};return b;}));
+    designerDialog.querySelectorAll('[data-source]').forEach(b=>b.classList.toggle('selected',b.dataset.source===designer.source));
+    const order=$('designer-dice');order.replaceChildren();designer.config.dice.forEach((die,i)=>{const row=document.createElement('div');row.className=`designer-die${i>=designer.config.count?' inactive':''}`;const text=document.createElement('div');text.innerHTML=`<span>${String(i+1).padStart(2,'0')}</span><strong></strong><small>${die.faces.length} sider${i>=designer.config.count?' · inaktiv':''}</small>`;text.querySelector('strong').textContent=die.name;const controls=document.createElement('div');[['↑',-1],['↓',1]].forEach(([label,dir])=>{const b=document.createElement('button');b.type='button';b.textContent=label;b.disabled=(dir<0&&i===0)||(dir>0&&i===designer.config.dice.length-1);b.onclick=()=>{const j=i+dir,[moved]=designer.config.dice.splice(i,1);designer.config.dice.splice(j,0,moved);paintDesigner();};controls.append(b);});row.append(text,controls);order.append(row);});
   }
-
-  if (!('indexedDB' in window)) return;
-  const sidebar=document.querySelector('.sidebar'); const anchor=document.querySelector('.mode-launcher') || document.querySelector('.sidebar .intro'); if(!sidebar||!anchor)return;
-  const launcher=document.createElement('button'); launcher.type='button'; launcher.className='pack-launcher'; launcher.innerHTML='<span class="pack-launcher-icon">◇</span><span><small>SPILPAKKER</small><strong>Gem & skift sæt</strong></span><span class="pack-arrow">↗</span>';
-  anchor.insertAdjacentElement('afterend',launcher);
-  const dialog=buildDialog(); launcher.onclick=async()=>{await renderList();dialog.showModal();};
+  async function openDesigner(pack=null){
+    if(!designerDialog)designerDialog=buildDesigner();$('designer-error').textContent='';designer.pack=pack;designer.source=pack?'saved':'current';const meta=packMeta(pack);designer.icon=meta.icon;designer.color=meta.color;designer.cover=meta.cover;designer.config=pack?clone(pack.config):clone(readJSON(CONFIG_KEY)||blankConfig());$('designer-name').value=pack?.name||'';$('designer-desc').value=meta.description;$('designer-count').value=designer.config.count;$('designer-source-wrap').hidden=Boolean(pack);$('designer-title').textContent=pack?'Rediger pakkedesign':'Design ny spilpakke';paintDesigner();designerDialog.showModal();
+  }
+  async function saveDesign(){
+    const button=$('save-design'),error=$('designer-error'),name=$('designer-name').value.trim(),description=$('designer-desc').value.trim();error.textContent='';if(!name){error.textContent='Giv pakken et navn.';return;}button.disabled=true;
+    try{let images=designer.pack?.images||[];if(!designer.pack&&designer.source==='current')images=await collectImages(designer.config);const now=Date.now(),pack={id:designer.pack?.id||uid('pack'),name,description,icon:designer.icon,color:designer.color,cover:designer.cover,createdAt:designer.pack?.createdAt||now,updatedAt:now,config:clone(designer.config),images};await packs.put(pack);designerDialog.close();await renderList();flash(designer.pack?'Pakkedesignet er opdateret.':'Ny spilpakke er oprettet.');}catch(err){error.textContent=err.message||'Designet kunne ikke gemmes.';}finally{button.disabled=false;}
+  }
+  async function renderList(){
+    const list=$('pack-list');if(!list)return;clearCoverURLs();list.replaceChildren();const active=localStorage.getItem(ACTIVE_KEY),all=(await packs.all()).sort((a,b)=>b.updatedAt-a.updatedAt);$('pack-count').textContent=`${all.length} ${all.length===1?'pakke':'pakker'}`;
+    if(!all.length){const e=document.createElement('div');e.className='pack-empty';e.innerHTML='<span>◇</span><strong>Ingen gemte pakker endnu</strong><p>Tryk “Design ny pakke” og byg jeres første fra bunden.</p>';list.append(e);return;}
+    all.forEach(pack=>{const meta=packMeta(pack),card=document.createElement('article');card.className=`pack-card${pack.id===active?' is-active':''}`;card.style.setProperty('--pack-color',meta.color);const imageCount=(pack.images||[]).length,sideCount=pack.config.dice.slice(0,pack.config.count).reduce((n,d)=>n+d.faces.length,0),cover=meta.cover?coverURL(meta.cover):'';
+      card.innerHTML=`<div class="pack-card-main"><div class="pack-art"><span class="pack-icon"></span></div><div class="pack-copy"><div class="pack-name-row"><h3></h3>${pack.id===active?'<span>AKTIV</span>':''}</div><p class="pack-description"></p><small>${pack.config.count} terninger · ${sideCount} sider${imageCount?` · ${imageCount} billeder`:''} · ${fmt(pack.updatedAt)}</small></div></div><div class="pack-card-actions"><button class="pack-load" type="button">Brug pakke</button><button class="pack-edit-design" type="button">Design</button><button class="pack-more" type="button">•••</button></div><div class="pack-secondary" hidden><button data-action="update" type="button">Gem nuværende oveni</button><button data-action="rename" type="button">Omdøb</button><button data-action="delete" class="danger" type="button">Slet</button></div>`;
+      const art=card.querySelector('.pack-art');if(cover)art.style.backgroundImage=`linear-gradient(0deg,#12081288,#12081218),url("${cover}")`;art.querySelector('.pack-icon').textContent=meta.icon;card.querySelector('h3').textContent=pack.name;card.querySelector('.pack-description').textContent=meta.description||'Personlig spilpakke';
+      card.querySelector('.pack-load').onclick=async e=>{e.currentTarget.disabled=true;try{await loadPack(pack.id);}catch(err){flash(err.message||'Kunne ikke åbne pakken.');e.currentTarget.disabled=false;}};card.querySelector('.pack-edit-design').onclick=()=>openDesigner(pack);const sec=card.querySelector('.pack-secondary');card.querySelector('.pack-more').onclick=()=>sec.hidden=!sec.hidden;
+      sec.querySelector('[data-action="update"]').onclick=async()=>{if(!confirm(`Erstat terningerne i “${pack.name}” med det aktive sæt? Designet bevares.`))return;try{await saveCurrent(pack.name,pack.id);await renderList();flash('Pakken er opdateret.');}catch(err){flash(err.message||'Kunne ikke opdatere.');}};
+      sec.querySelector('[data-action="rename"]').onclick=async()=>{const name=prompt('Nyt navn:',pack.name);if(name===null)return;const clean=name.trim();if(!clean||clean.length>40){flash('Navnet skal være 1–40 tegn.');return;}pack.name=clean;pack.updatedAt=Date.now();await packs.put(pack);await renderList();};
+      sec.querySelector('[data-action="delete"]').onclick=async()=>{if(!confirm(`Slet “${pack.name}”? Det kan ikke fortrydes.`))return;await packs.del(pack.id);if(active===pack.id)localStorage.removeItem(ACTIVE_KEY);await renderList();flash('Pakken er slettet.');};list.append(card);});
+  }
+  if(!('indexedDB'in window))return;const sidebar=document.querySelector('.sidebar'),anchor=document.querySelector('.mode-launcher')||document.querySelector('.sidebar .intro');if(!sidebar||!anchor)return;const launcher=document.createElement('button');launcher.type='button';launcher.className='pack-launcher';launcher.innerHTML='<span class="pack-launcher-icon">◇</span><span><small>SPILPAKKER</small><strong>Bibliotek & designer</strong></span><span class="pack-arrow">↗</span>';anchor.insertAdjacentElement('afterend',launcher);libraryDialog=buildLibrary();launcher.onclick=async()=>{await renderList();libraryDialog.showModal();};
 })();
