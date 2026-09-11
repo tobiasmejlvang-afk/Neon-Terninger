@@ -4,48 +4,46 @@ Dansk terningapp til mobil og tablet med et mørkt, sensuelt neon-tema. Kører d
 
 ## Spiltilstande
 
-Appen har fire færdige intensitetsniveauer:
+Appen har fire færdige intensitetsniveauer: **Romantisk**, **Flirtende**, **Vovet** og **After Dark**. Hver tilstand indlæser fire specialterninger, som bagefter kan redigeres med egne tekster og billeder. Brugerens personlige sæt kan gendannes efter brug af presets.
 
-- **Romantisk** – nærhed, søde ord og rolig kemi.
-- **Flirtende** – mere blik, kys, spænding og drilleri.
-- **Vovet** – mere mod, berøring og fristelse.
-- **After Dark** – den mest intense standardtilstand, stadig med fokus på frivillighed og egne grænser.
+## Spilpakker og designer
 
-Hver tilstand indlæser fire færdige specialterninger. De fungerer bagefter som almindelige terninger og kan redigeres med egne tekster og billeder. Første gang et preset aktiveres, gemmes brugerens nuværende personlige terninger som backup, så de kan gendannes fra Spilvælgeren. Skift mellem presets overskriver ikke denne backup.
+**Spilpakker** er et lokalt bibliotek til komplette personlige sæt som fx **Date Night**, **Weekend**, **Hotel** eller **Vores favoritter**.
 
-## Egne spilpakker
+Den indbyggede **Spilpakke-designer** kan:
 
-**Spilpakker** er et lokalt bibliotek til komplette personlige sæt. Et aktivt sæt kan gemmes som fx **Date Night**, **Weekend**, **Hotel** eller **Vores favoritter** og hentes igen med ét tryk.
+- Oprette en pakke fra det aktuelle sæt eller som en helt ny tom pakke.
+- Give pakken navn og en kort beskrivelse.
+- Vælge mellem 8 ikoner og 8 farvetemaer.
+- Tilføje et coverbillede, som automatisk skaleres og WebP-optimeres.
+- Vælge 1–4 aktive terninger.
+- Ændre terningernes rækkefølge uden at slette de inaktive terninger.
+- Redigere designet på allerede gemte pakker uden at miste terningernes indhold.
 
-- Pakken gemmer antal aktive terninger, navne, alle sider og tekster.
-- Billeder kopieres ind i pakkens eget IndexedDB-snapshot, så pakken ikke er afhængig af billedreferencerne i det aktive sæt.
-- Når en pakke åbnes, gendannes dens billeder til terningernes billedlager med nye interne ID'er.
-- En gemt pakke kan åbnes, overskrives med det aktuelle sæt, omdøbes eller slettes.
-- Pakker gemmes kun lokalt på den aktuelle enhed og sendes ikke til en server.
+Pakken gemmer antal aktive terninger, navne, sider, tekster og billeder. Billeder kopieres til pakkens eget IndexedDB-snapshot. Når pakken åbnes, gendannes billederne med nye interne ID'er. En gemt pakke kan åbnes, opdateres med det aktive sæt, designes, omdøbes eller slettes. Cover, ikon, farve og beskrivelse bevares, når indholdet opdateres.
 
 ## Brug
 
-- Vælg 1–4 aktive terninger og slå med én ad gangen. Den glødende knap vælger næste ukastede terning, eller vælg selv en bestemt terning.
+- Vælg 1–4 aktive terninger og slå med én ad gangen.
 - Rediger navn og 2–20 sider på hver terning.
-- Hver side kan indeholde **tekst, billede eller begge dele**. Tal og emojis fungerer stadig som før.
-- Uploadede billeder skaleres automatisk ned til maks. 1200 px på længste led og WebP-komprimeres for at holde appen hurtig.
+- Hver side kan indeholde **tekst, billede eller begge dele**.
+- Uploadede billeder skaleres automatisk ned og WebP-komprimeres.
 - Tekst og terningekonfiguration gemmes i `localStorage`. Billeder og spilpakker gemmes i browserens `IndexedDB`.
-- Eksisterende version 1-terninger med tekst migreres automatisk til den nye version 2-datamodel.
 - Ingen konto, analyseværktøjer, cloud-upload eller synkronisering. Personlige billeder forlader ikke enheden i denne implementation.
-- Tilføj appen til hjemmeskærmen fra Safari på iPad eller Chrome på Android. Efter første fulde indlæsning kan den bruges offline.
+- Appen kan installeres på hjemmeskærmen og bruges offline efter første fulde indlæsning.
 
 ## Visuelt tema
 
-Grunddesignet bruger sort/plum baggrund, vinrød, pink og violet neon, bløde glows og et voksent, elegant udtryk. Valgt spiltilstand påvirker også accentfarver og terningens glow, så intensiteten kan aflæses visuelt. Layoutet er responsivt til mobil, tablet og desktop.
+Grunddesignet bruger sort/plum baggrund, vinrød, pink og violet neon, bløde glows og et voksent, elegant udtryk. Spiltilstand og pakkedesign giver yderligere visuel variation. Layoutet er responsivt til mobil, tablet og desktop.
 
 ## Udgiv fra docs
 
 I GitHub: Settings → Pages → Deploy from a branch → `main` → `/docs` → Save.
 
-Alle stier er relative, så appen fungerer på en GitHub Pages-projektadresse. Der er ingen eksterne script- eller skrifttypeafhængigheder.
+Alle stier er relative, og der er ingen eksterne script- eller skrifttypeafhængigheder.
 
 ## Teknisk
 
-HTML, CSS og almindelig JavaScript. Native dialoger, IndexedDB til billed-blobs og pakkesnapshots, Canvas/WebP-optimering, store trykflader, responsivt layout og støtte for reducerede animationer. `modes.js`/`modes.css` holder spiltilstande adskilt fra terningemotoren, mens `packs.js`/`packs.css` håndterer det lokale pakkebibliotek. Tilfældige resultater bruger `crypto.getRandomValues` med rejection sampling. Kun ét slag kan køre ad gangen.
+HTML, CSS og almindelig JavaScript. Native dialoger, IndexedDB til billed-blobs og pakkesnapshots, Canvas/WebP-optimering, responsivt layout og støtte for reducerede animationer. `modes.js`/`modes.css` håndterer spiltilstande, mens `packs.js`/`packs.css` håndterer pakkebibliotek og designer. Tilfældige resultater bruger `crypto.getRandomValues` med rejection sampling.
 
 Ved fremtidige ændringer: opdater cacheversionen i `docs/sw.js`, så offlinefiler fornyes.
