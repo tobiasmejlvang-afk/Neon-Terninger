@@ -81,7 +81,8 @@
   function applyMode(id, dialog) {
     const mode = MODES[id]; if (!mode) return;
     const existing = readJSON(CONFIG_KEY);
-    if (existing?.version === 2 && current?.id !== id) writeJSON(BACKUP_KEY, existing);
+    const cameFromPreset = Boolean(MODES[current?.id]);
+    if (existing?.version === 2 && !cameFromPreset && !localStorage.getItem(BACKUP_KEY)) writeJSON(BACKUP_KEY, existing);
     const config = {version: 2, count: 4, dice: mode.dice};
     if (!writeJSON(CONFIG_KEY, config) || !writeJSON(MODE_KEY, {id, name: mode.name, appliedAt: Date.now()})) {
       alert('Browseren kunne ikke gemme spiltilstanden. Kontroller at lokal lagring er tilladt.'); return;
