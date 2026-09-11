@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="da">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#101014">
+  <meta name="description" content="Dine terninger, dine regler. Spil med op til fire terninger med dine egne tekster, tal og emojis.">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <title>Neon Terninger</title>
+  <link rel="icon" type="image/svg+xml" href="./icon.svg">
+  <link rel="apple-touch-icon" href="./icon-192.png">
+  <link rel="manifest" href="./manifest.webmanifest">
+  <link rel="stylesheet" href="./style.css">
+  <script src="./app.js" defer></script>
+</head>
+<body>
+  <header class="topbar">
+    <a class="brand" href="./" aria-label="Neon Terninger, startside"><span class="brand-icon" aria-hidden="true">⠿</span><span>NEON<span class="brand-sub">TERNINGER</span></span></a>
+    <div class="header-actions"><span class="local-note" id="storage-label">Gemt på denne enhed</span><button class="icon-button" id="help-button" aria-label="Hjælp og tilføj til hjemmeskærm"><span aria-hidden="true">?</span></button></div>
+  </header>
+  <main class="workspace">
+    <aside class="sidebar" aria-label="Vælg terninger">
+      <div class="section-heading"><span class="eyebrow">DIT SPIL</span><span class="tiny-line"></span></div>
+      <h1>Dine terninger<span class="red">.</span></h1>
+      <p class="muted intro">Vælg en terning. Lad tilfældet råde.</p>
+      <div class="count-control"><span id="count-label">Antal terninger</span><div class="segmented" id="dice-count" role="group" aria-labelledby="count-label"></div></div>
+      <div id="dice-list" class="dice-list"></div>
+      <button id="edit-button" class="secondary-button edit-button"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m15 5 4 4M4 20l4-1L20 7a2.8 2.8 0 0 0-4-4L4 15z"/></svg>Rediger terninger</button>
+      <div class="sidebar-foot"><span class="small-die" aria-hidden="true">✦</span><p>Tal, ord eller emojis.<br><span class="muted">Du bestemmer siderne.</span></p></div>
+    </aside>
+    <section class="play-area" aria-label="Spillebord">
+      <div class="arena-header"><div><span class="eyebrow" id="round-label">RUNDE 01</span><h2 id="active-name">Terning 1</h2></div><button class="text-button" id="new-round"><span aria-hidden="true">↻</span> Ny runde</button></div>
+      <div class="arena">
+        <div class="orbit orbit-one" aria-hidden="true"></div><div class="orbit orbit-two" aria-hidden="true"></div>
+        <span class="arena-corner top-left" aria-hidden="true"></span><span class="arena-corner bottom-right" aria-hidden="true"></span>
+        <div class="die-stage"><div class="die-block" id="die-block"><div class="die-face" id="die-face"><span class="question-mark">?</span></div></div></div>
+        <div class="result-copy"><p id="result-caption" class="eyebrow">KLAR TIL FØRSTE SLAG</p><p id="result-value">Hvad mon det bliver?</p></div>
+      </div>
+      <div class="roll-controls"><button class="roll-button" id="roll-button"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="4" width="16" height="16" rx="4"/><circle cx="9" cy="9" r="1"/><circle cx="15" cy="15" r="1"/><circle cx="12" cy="12" r="1"/></svg><span id="roll-label">Slå med Terning 1</span><span class="roll-arrow" aria-hidden="true">↗</span></button><p class="muted roll-hint" id="roll-hint">Én terning ad gangen. Helt på dine præmisser.</p></div>
+      <section class="round-results" aria-label="Resultater i denne runde"><div class="results-heading"><h3>Denne runde</h3><span id="progress-label">0 af 4 kastet</span></div><div id="results-list" class="results-list"></div></section>
+    </section>
+  </main>
+  <footer class="page-footer"><span>DIT SPIL. DINE REGLER.</span><span>NEON TERNINGER <span class="red">/</span> 01</span></footer>
+  <p id="announcement" class="sr-only" role="status" aria-live="polite" aria-atomic="true"></p>
+  <dialog id="editor" aria-labelledby="editor-title">
+    <form id="editor-form">
+      <div class="dialog-heading"><div><span class="eyebrow">GØR SPILLET TIL DIT</span><h2 id="editor-title">Rediger terninger</h2></div><button type="button" class="icon-button" id="close-editor" aria-label="Luk uden at gemme">×</button></div>
+      <p class="muted">Skriv tal, tekst eller emojis på siderne. Alle sider har samme chance.</p>
+      <div id="editor-tabs" class="editor-tabs" role="group" aria-label="Terning der redigeres"></div>
+      <label class="field-label" for="die-name">Terningens navn</label><input id="die-name" maxlength="30" required autocomplete="off">
+      <div class="faces-heading"><label class="field-label">Sider <span class="muted" id="face-count"></span></label><span class="muted">2–20 sider</span></div>
+      <div id="face-inputs" class="face-inputs"></div>
+      <button class="text-button add-face" id="add-face" type="button">＋ Tilføj side</button>
+      <p class="form-error" id="editor-error" role="alert"></p>
+      <div class="dialog-footer"><button class="secondary-button" id="cancel-editor" type="button">Annuller</button><button type="submit" class="primary-button">Gem terninger <span aria-hidden="true">✓</span></button></div>
+    </form>
+  </dialog>
+  <dialog id="help" aria-labelledby="help-title"><div class="dialog-heading"><div><span class="eyebrow">GODT AT VIDE</span><h2 id="help-title">Klar til at spille</h2></div><button class="icon-button" id="close-help" aria-label="Luk hjælp">×</button></div><ol class="help-steps"><li>Vælg mellem <strong>1 og 4 terninger</strong>.</li><li>Tryk <strong>Rediger terninger</strong> for at give hver terning navn og indhold på siderne.</li><li>Tryk på den røde knap for at slå. Næste tryk slår med den næste terning. Du kan også vælge en terning til venstre.</li><li><strong>Ny runde</strong> rydder resultaterne. Dine terninger beholdes.</li></ol><div class="install-note"><h3>Som app på din tablet</h3><p><strong>iPad:</strong> Åbn i Safari, tryk Del, og vælg Føj til hjemmeskærm.</p><p><strong>Android:</strong> Åbn i Chrome, tryk ⋮, og vælg Føj til startskærm eller Installer app.</p></div><p class="muted">Terningerne gemmes i denne browser på denne enhed og synkroniseres ikke. Hvis du rydder browserdata, slettes de. Efter første indlæsning med internet kan appen også bruges offline.</p></dialog>
+</body>
+</html>
