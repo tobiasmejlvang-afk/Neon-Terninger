@@ -86,7 +86,8 @@
         const group = svg('g', {}), path = svg('path', {d:`M 200 200 L ${a.x} ${a.y} A 190 190 0 ${step > 180 ? 1 : 0} 1 ${b.x} ${b.y} Z`, class:'wheel-sector', fill:i % 2 === 0 ? '#8c0925' : '#210b12', stroke:'#ff47564d', 'stroke-width':'1'});
         const position = polar(count > 12 ? 151 : 139, i * step);
         const text = svg('text', {x:position.x, y:position.y, 'text-anchor':'middle', 'dominant-baseline':'middle', transform:`rotate(${i * step}, ${position.x}, ${position.y})`, class:'wheel-label', 'font-size':count > 12 ? '11' : '13'});
-        const label = faceLabel(face); text.textContent = [...label].length > 12 ? [...label].slice(0,11).join('') + '…' : label;
+        const label = faceLabel(face), maxLetters = count > 12 ? 6 : count > 8 ? 8 : 12;
+        text.textContent = [...label].length > maxLetters ? [...label].slice(0,maxLetters - 1).join('') + '…' : label;
         const title = svg('title', {}); title.textContent = `${i + 1}. ${label}`;
         group.append(title, path, text); disc.append(group);
       });
