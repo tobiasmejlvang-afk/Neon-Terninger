@@ -34,7 +34,7 @@ Pakken gemmer antal aktive terninger, navne, sider, tekster og billeder. Billede
 
 ## Visuelt tema
 
-Grunddesignet bruger sort/plum baggrund, vinrød, pink og violet neon, bløde glows og et voksent, elegant udtryk. Spiltilstand og pakkedesign giver yderligere visuel variation. Layoutet er responsivt til mobil, tablet og desktop.
+Grunddesignet bruger sort krom, dybrødt neon, blanke overflader og glød. Terninger, slotmaskine og spin-hjul har hver deres animation, efterfulgt af en kort partikeleffekt. Spiltilstand og pakkedesign giver yderligere visuel variation. Layoutet er responsivt til mobil, tablet og desktop.
 
 ## Udgiv fra docs
 
@@ -47,3 +47,9 @@ Alle stier er relative, og der er ingen eksterne script- eller skrifttypeafhæng
 HTML, CSS og almindelig JavaScript. Native dialoger, IndexedDB til billed-blobs og pakkesnapshots, Canvas/WebP-optimering, responsivt layout og støtte for reducerede animationer. `modes.js`/`modes.css` håndterer spiltilstande, mens `packs.js`/`packs.css` håndterer pakkebibliotek og designer. Tilfældige resultater bruger `crypto.getRandomValues` med rejection sampling.
 
 Ved fremtidige ændringer: opdater cacheversionen i `docs/sw.js`, så offlinefiler fornyes.
+
+## Spilleplader
+
+Vælg mellem **Terninger**, **Lucky Slot** og **Spin-hjul**. Alle tre deler de samme redigerbare sider, billeder, spilpakker og resultater. Op til fire terninger/hjul kan bruges; kun ét animeres pr. handling. Hjulets markør og slotmaskinens midterlinje lander på det udtrukne felt. Identiske tekster forbliver separate felter med hver sin chance. Valg af spilleplade og effekter gemmes separat fra terningernes indhold.
+
+Temaet bruger dybrødt neon, sort krom, glans og glød. Knappen **Effekter til/fra** dæmper bevægelserne, og systemets reduceret-bevægelse-indstilling respekteres. Der er ingen lydafspilning.

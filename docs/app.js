@@ -52,15 +52,18 @@
   })();
 
   const imageURLs = new Map();
+  const imagePromises = new Map();
   async function imageURL(id) {
     if (!id) return '';
     if (imageURLs.has(id)) return imageURLs.get(id);
-    try { const blob = await media.get(id); if (!blob) return ''; const url = URL.createObjectURL(blob); imageURLs.set(id, url); return url; } catch { return ''; }
+    if (imagePromises.has(id)) return imagePromises.get(id);
+    const pending=(async()=>{try { const blob=await media.get(id); if(!blob)return ''; const url=URL.createObjectURL(blob); imageURLs.set(id,url); return url; }catch{return '';}finally{imagePromises.delete(id);}})(); imagePromises.set(id,pending); return pending;
   }
   function dropCachedURL(id) { if (imageURLs.has(id)) { URL.revokeObjectURL(imageURLs.get(id)); imageURLs.delete(id); } }
   async function deleteImage(id) { if (!id) return; try { await media.del(id); } catch {} dropCachedURL(id); }
   async function cleanupUnusedImages() {
     const used = new Set(config.dice.flatMap(d => d.faces.map(f => f.imageId).filter(Boolean)));
+    try { const backup=JSON.parse(localStorage.getItem('neon-terninger-custom-backup-v1')||'null'); for(const d of backup?.dice||[]) for(const f of d.faces||[]) if(f.imageId) used.add(f.imageId); } catch {}
     try { for (const id of await media.keys()) if (!used.has(id)) await deleteImage(id); } catch {}
   }
   async function prepareImage(file) {
@@ -80,16 +83,18 @@
     } finally { URL.revokeObjectURL(source); }
   }
 
-  let selected = 0, next = 0, round = 1, busy = false, results = [null,null,null,null];
+  let selected = 0, next = 0, round = 1, busy = false, results = [null,null,null,null], resultIndices = [null,null,null,null];
+  let imageBusy = false;
   let draft, editing = 0, sessionNewImages = new Set(), facePaint = 0;
   const announce = text => { $('announcement').textContent = text; };
   const element = (tag, className, content) => { const el = document.createElement(tag); if (className) el.className = className; if (content !== undefined) el.textContent = content; return el; };
   const faceLabel = face => face?.text?.trim() || (face?.imageId ? 'Billedside' : 'Tom side');
+  const boardUI = window.NeonBoards.create({onChange:render, onSelect:selectDie, faceLabel, imageURL});
   function save() { try { localStorage.setItem(KEY, JSON.stringify(config)); storageOK = true; } catch { storageOK = false; announce('Ændringerne virker nu, men browseren kunne ikke gemme dem.'); } updateStorage(); }
   function updateStorage() { $('storage-label').textContent = storageOK ? 'Tekst + billeder gemt lokalt' : 'Kun gemt indtil siden lukkes'; }
-  function resetRound(increment = true) { if (busy) return; if (increment) round++; selected = 0; next = 0; results = [null,null,null,null]; render(); }
+  function resetRound(increment = true) { if (busy) return; if (increment) round++; selected = 0; next = 0; results = [null,null,null,null]; resultIndices = [null,null,null,null]; render(); }
   function setCount(count) { if (busy || !Number.isInteger(count) || count < 1 || count > 4) return; config.count = count; save(); resetRound(false); $('dice-count').children[count - 1].focus(); }
-  function selectDie(index) { if (busy || index < 0 || index >= config.count) return; selected = index; next = index; render(); $('dice-list').children[index].focus(); }
+  function selectDie(index, source = 'list') { if (busy || index < 0 || index >= config.count) return; selected = index; next = index; render(); if (source === 'reel') document.querySelector(`[data-reel="${index}"]`)?.focus(); else $('dice-list').children[index].focus(); }
 
   async function addFaceImage(container, imageId, className, alt) {
     const token = container.dataset.paint || '';
@@ -126,15 +131,27 @@
     ['roll-button','new-round','edit-button'].forEach(id=>$(id).disabled=busy); $('roll-hint').textContent=complete?'Alle terninger er kastet. Frist skæbnen igen, eller start en ny runde.':'Én terning ad gangen. Resten er op til jer.'; $('progress-label').textContent=`${results.slice(0,config.count).filter(r=>r!==null).length} af ${config.count} kastet`;
     const summaries=$('results-list'); summaries.replaceChildren(); summaries.style.setProperty('--count',config.count);
     config.dice.slice(0,config.count).forEach((die,i)=>{ const card=element('div',`result-card${results[i]!==null?' has-result':''}`); card.append(element('small','',die.name)); appendResultContent(card,results[i]); summaries.append(card); }); updateStorage();
+    document.querySelectorAll('#open-mode, .pack-launcher').forEach(button => { button.disabled = busy; });
+    boardUI.render({config, selected, next, busy, results, resultIndices});
   }
 
   function randomIndex(length) { const limit=Math.floor(4294967296/length)*length; const data=new Uint32Array(1); do { crypto.getRandomValues(data); } while(data[0]>=limit); return data[0]%length; }
   async function roll(index=next) {
-    if (busy) throw new Error('En terning ruller allerede.'); if (!Number.isInteger(index)||index<0||index>=config.count) throw new Error('Vælg en aktiv terning.');
-    busy=true; selected=index; render(); $('result-caption').textContent='SPÆNDINGEN STIGER'; $('result-value').textContent='Terningen ruller…'; const die=config.dice[index]; const reduce=matchMedia('(prefers-reduced-motion: reduce)').matches; $('die-block').classList.add('is-rolling');
-    const ticker=reduce?null:setInterval(()=>faceView(die.faces[randomIndex(die.faces.length)]),100); await new Promise(resolve=>setTimeout(resolve,reduce?120:900)); if(ticker!==null) clearInterval(ticker); results[index]=die.faces[randomIndex(die.faces.length)]; $('die-block').classList.remove('is-rolling'); busy=false; next=index;
-    for(let offset=1;offset<=config.count;offset++){const candidate=(index+offset)%config.count;if(results[candidate]===null){next=candidate;break;}}
-    render(); announce(`${die.name}: ${faceLabel(results[index])}. ${results.slice(0,config.count).filter(r=>r!==null).length} af ${config.count} terninger kastet.`); return {die:die.name,result:{text:results[index].text,hasImage:Boolean(results[index].imageId)}};
+    if (busy) throw new Error('Et slag er allerede i gang.');
+    if (document.querySelector('dialog[open]')) throw new Error('Luk den åbne dialog først.');
+    if (!Number.isInteger(index)||index<0||index>=config.count) throw new Error('Vælg en aktiv terning.');
+    const die=config.dice[index], outcome=randomIndex(die.faces.length);
+    busy=true; selected=index; render();
+    $('result-caption').textContent='SPÆNDINGEN STIGER';
+    $('result-value').textContent=boardUI.mode==='dice'?'Terningen ruller…':'Hjulet ruller…';
+    try {
+      await boardUI.spin(index,outcome,faceView);
+      results[index]=die.faces[outcome]; resultIndices[index]=outcome; next=index;
+      for(let offset=1;offset<=config.count;offset++){const candidate=(index+offset)%config.count;if(results[candidate]===null){next=candidate;break;}}
+    } finally { busy=false; render(); }
+    boardUI.reveal();
+    announce(die.name+': '+faceLabel(results[index])+'. '+results.slice(0,config.count).filter(Boolean).length+' af '+config.count+' færdige.');
+    return {die:die.name,board:boardUI.mode,faceIndex:outcome,result:{text:results[index].text,hasImage:Boolean(results[index].imageId)}};
   }
 
   function openEditor(){ if(busy)return; draft=JSON.parse(JSON.stringify(config.dice)); editing=selected; sessionNewImages=new Set(); $('editor-error').textContent=''; renderEditor(); $('editor').showModal(); }
@@ -147,18 +164,18 @@
       const grid=element('div','face-editor-grid'); const preview=element('div','face-preview'); void paintEditorPreview(preview,face);
       const fields=element('div','face-fields'); const textLabel=element('label','mini-label','Tekst'); textLabel.htmlFor=`face-${i}`; const input=element('input'); input.id=`face-${i}`; input.value=face.text; input.maxLength=160; input.placeholder='Fx Kys mig, Massage, 6…'; input.addEventListener('input',()=>{draft[editing].faces[i].text=input.value;});
       const actions=element('div','image-actions'); const uploadLabel=element('label','upload-button',face.imageId?'Skift billede':'Tilføj billede'); const file=element('input','file-input'); file.type='file'; file.accept='image/*'; file.setAttribute('aria-label',`Vælg billede til side ${i+1}`); uploadLabel.append(file);
-      file.addEventListener('change',async()=>{const chosen=file.files?.[0];if(!chosen)return; file.disabled=true; $('editor-error').textContent='Optimerer billedet…'; try{const blob=await prepareImage(chosen);const id=crypto.randomUUID?crypto.randomUUID():`${Date.now()}-${Math.random().toString(36).slice(2)}`;await media.put(id,blob);sessionNewImages.add(id);const old=draft[editing].faces[i].imageId;if(sessionNewImages.has(old)&&old!==id){sessionNewImages.delete(old);await deleteImage(old);}draft[editing].faces[i].imageId=id;$('editor-error').textContent='';renderEditor();}catch(error){$('editor-error').textContent=error.message||'Billedet kunne ikke tilføjes.';file.disabled=false;}});
+      file.addEventListener('change',async()=>{const chosen=file.files?.[0];if(!chosen||imageBusy)return; const targetFace=face; imageBusy=true; $('editor-form').querySelectorAll('button,input').forEach(control=>control.disabled=true); $('editor-error').textContent='Optimerer billedet…'; try{const blob=await prepareImage(chosen);const id=crypto.randomUUID?crypto.randomUUID():`${Date.now()}-${Math.random().toString(36).slice(2)}`;await media.put(id,blob);sessionNewImages.add(id);const old=targetFace.imageId;if(sessionNewImages.has(old)&&old!==id){sessionNewImages.delete(old);await deleteImage(old);}targetFace.imageId=id;$('editor-error').textContent='';renderEditor();}catch(error){$('editor-error').textContent=error.message||'Billedet kunne ikke tilføjes.';}finally{imageBusy=false;$('editor-form').querySelectorAll('button,input').forEach(control=>control.disabled=false);renderEditor();}});
       actions.append(uploadLabel); if(face.imageId){const clear=element('button','clear-image','Fjern billede');clear.type='button';clear.addEventListener('click',async()=>{const id=draft[editing].faces[i].imageId;if(sessionNewImages.has(id)){sessionNewImages.delete(id);await deleteImage(id);}draft[editing].faces[i].imageId='';renderEditor();});actions.append(clear);}
       fields.append(textLabel,input,actions); grid.append(preview,fields); card.append(top,grid); container.append(card);
     }); $('face-count').textContent=`(${draft[editing].faces.length})`; $('add-face').disabled=draft[editing].faces.length>=20;
   }
   $('die-name').addEventListener('input',()=>{draft[editing].name=$('die-name').value;});
   $('add-face').addEventListener('click',()=>{if(draft[editing].faces.length>=20)return;draft[editing].faces.push(emptyFace(''));renderEditor();$('face-inputs').lastElementChild.querySelector('input:not([type=file])').focus();});
-  async function cancelEditor(){for(const id of sessionNewImages)await deleteImage(id);sessionNewImages.clear();$('editor').close();}
-  $('editor-form').addEventListener('submit',async event=>{event.preventDefault(); const normalized=draft.map(d=>({name:d.name.trim(),faces:d.faces.map(f=>({text:f.text.trim(),imageId:f.imageId||''}))})); const bad=normalized.findIndex(d=>!d.name||d.faces.some(f=>!f.text&&!f.imageId)); if(bad!==-1){editing=bad;renderEditor();$('editor-error').textContent=`Udfyld tekst eller tilføj et billede på alle sider af terning ${bad+1}.`;return;} config={...config,version:2,dice:normalized};sessionNewImages.clear();save();$('editor').close();resetRound(false);void cleanupUnusedImages();announce(storageOK?'Dine terninger er gemt. Klar til en ny runde.':'Terningerne er ændret, men teksten kunne ikke gemmes på enheden.');});
+  async function cancelEditor(){if(imageBusy){$('editor-error').textContent='Vent, mens billedet gemmes…';return;}for(const id of sessionNewImages)await deleteImage(id);sessionNewImages.clear();$('editor').close();}
+  $('editor-form').addEventListener('submit',async event=>{event.preventDefault(); if(imageBusy){$('editor-error').textContent='Vent, mens billedet gemmes…';return;} const normalized=draft.map(d=>({name:d.name.trim(),faces:d.faces.map(f=>({text:f.text.trim(),imageId:f.imageId||''}))})); const bad=normalized.findIndex(d=>!d.name||d.faces.some(f=>!f.text&&!f.imageId)); if(bad!==-1){editing=bad;renderEditor();$('editor-error').textContent=`Udfyld tekst eller tilføj et billede på alle sider af terning ${bad+1}.`;return;} config={...config,version:2,dice:normalized};sessionNewImages.clear();save();$('editor').close();resetRound(false);void cleanupUnusedImages();announce(storageOK?'Dine terninger er gemt. Klar til en ny runde.':'Terningerne er ændret, men teksten kunne ikke gemmes på enheden.');});
   $('close-editor').addEventListener('click',()=>void cancelEditor()); $('cancel-editor').addEventListener('click',()=>void cancelEditor()); $('editor').addEventListener('cancel',event=>{event.preventDefault();void cancelEditor();});
-  $('edit-button').addEventListener('click',openEditor); $('roll-button').addEventListener('click',()=>{if(!busy)void roll();}); $('new-round').addEventListener('click',()=>{resetRound();announce('Ny runde. Dine terninger er klar.');}); $('help-button').addEventListener('click',()=>$('help').showModal()); $('close-help').addEventListener('click',()=>$('help').close());
+  $('edit-button').addEventListener('click',openEditor); $('roll-button').addEventListener('click',()=>{if(!busy)void roll().catch(error=>announce(error.message||'Slaget kunne ikke gennemføres. Prøv igen.'));}); $('new-round').addEventListener('click',()=>{resetRound();announce('Ny runde. Dine terninger er klar.');}); $('help-button').addEventListener('click',()=>$('help').showModal()); $('close-help').addEventListener('click',()=>$('help').close());
   if (config.version === 2) save(); render(); void cleanupUnusedImages();
   if('serviceWorker'in navigator&&location.protocol!=='file:')navigator.serviceWorker.register('./sw.js').catch(()=>{});
-  if(document.modelContext?.registerTool){const lifecycle=new AbortController();const register=tool=>{try{Promise.resolve(document.modelContext.registerTool(tool,{signal:lifecycle.signal})).catch(()=>{});}catch{}};register({name:'read_dice_game',description:'Read active dice, text/image face metadata and current round results.',inputSchema:{type:'object',properties:{},additionalProperties:false},annotations:{readOnlyHint:true,untrustedContentHint:true},execute:()=>({count:config.count,dice:config.dice.slice(0,config.count).map(d=>({name:d.name,faces:d.faces.map(f=>({text:f.text,hasImage:Boolean(f.imageId)}))})),results:results.slice(0,config.count).map(r=>r?{text:r.text,hasImage:Boolean(r.imageId)}:null),round,busy})});register({name:'roll_one_die',description:'Roll one active die (1–4). Waits for the result.',inputSchema:{type:'object',properties:{die:{type:'integer',minimum:1,maximum:4}},required:['die'],additionalProperties:false},annotations:{readOnlyHint:false,untrustedContentHint:true},execute:async input=>{if(!input||!Number.isInteger(input.die))throw new Error('die must be an integer');if($('editor').open||$('help').open)throw new Error('Close the open dialog first.');return roll(input.die-1);}});window.addEventListener('pagehide',()=>lifecycle.abort(),{once:true});}
+  if(document.modelContext?.registerTool){const lifecycle=new AbortController();const register=tool=>{try{Promise.resolve(document.modelContext.registerTool(tool,{signal:lifecycle.signal})).catch(()=>{});}catch{}};register({name:'read_dice_game',description:'Read active dice, text/image face metadata and current round results.',inputSchema:{type:'object',properties:{},additionalProperties:false},annotations:{readOnlyHint:true,untrustedContentHint:true},execute:()=>({board:boardUI.mode,faceIndices:resultIndices.slice(0,config.count),count:config.count,dice:config.dice.slice(0,config.count).map(d=>({name:d.name,faces:d.faces.map(f=>({text:f.text,hasImage:Boolean(f.imageId)}))})),results:results.slice(0,config.count).map(r=>r?{text:r.text,hasImage:Boolean(r.imageId)}:null),round,busy})});register({name:'roll_one_die',description:'Roll one active die (1–4). Waits for the result.',inputSchema:{type:'object',properties:{die:{type:'integer',minimum:1,maximum:4}},required:['die'],additionalProperties:false},annotations:{readOnlyHint:false,untrustedContentHint:true},execute:async input=>{if(!input||!Number.isInteger(input.die))throw new Error('die must be an integer');if($('editor').open||$('help').open)throw new Error('Close the open dialog first.');return roll(input.die-1);}});register({name:'select_game_board',description:'Choose dice, slot or wheel. Preserves sides and round results. Fails while spinning or when a dialog is open.',inputSchema:{type:'object',properties:{board:{type:'string',enum:['dice','slot','wheel']}},required:['board'],additionalProperties:false},annotations:{readOnlyHint:false,untrustedContentHint:false},execute:input=>{boardUI.setMode(input?.board);return {board:boardUI.mode};}});window.addEventListener('pagehide',()=>lifecycle.abort(),{once:true});}
 })();
