@@ -25,20 +25,22 @@
   function create({onChange, onSelect, faceLabel, imageURL}) {
     const $ = id => document.getElementById(id);
     let mode = read(KEY, 'dice'); if (!MODES.includes(mode)) mode = 'dice';
-    let effects = read(EFFECTS_KEY, 'full') === 'quiet' ? 'quiet' : 'full';
+    let effects = read(EFFECTS_KEY, 'auto');
+    if (!['auto', 'full', 'quiet'].includes(effects)) effects = 'auto';
     let state, paint = 0, revealTimer;
     const media = matchMedia('(prefers-reduced-motion: reduce)');
-    const reduce = () => effects === 'quiet' || media.matches;
+    // Follow the device until the player makes an explicit choice in this app.
+    const reduce = () => effects === 'quiet' || (effects === 'auto' && media.matches);
     function effectState() {
       document.body.dataset.effects = reduce() ? 'quiet' : 'full';
       $('effects-button').textContent = reduce() ? '✦ Effekter fra' : '✦ Effekter til';
       $('effects-button').setAttribute('aria-pressed', String(!reduce()));
-      $('effects-button').disabled = media.matches || Boolean(state?.busy);
-      $('effects-button').title = media.matches ? 'Reduceret bevægelse følger enhedens indstilling.' : 'Slå animationer og glødende effekter til eller fra';
+      $('effects-button').disabled = Boolean(state?.busy);
+      $('effects-button').title = reduce() ? 'Slå animationer og glødende effekter til. Dit valg huskes på denne enhed.' : 'Slå animationer og glødende effekter fra. Dit valg huskes på denne enhed.';
     }
     effectState();
     media.addEventListener?.('change', effectState);
-    $('effects-button').addEventListener('click', () => { if (state?.busy) return; effects = effects === 'full' ? 'quiet' : 'full'; save(EFFECTS_KEY, effects); effectState(); });
+    $('effects-button').addEventListener('click', () => { if (state?.busy) return; effects = reduce() ? 'full' : 'quiet'; save(EFFECTS_KEY, effects); effectState(); });
     function setMode(value) {
       if (!MODES.includes(value)) throw new Error('Ukendt spilleplade.');
       if (state?.busy || document.querySelector('dialog[open]')) throw new Error('Afslut det igangværende slag eller den åbne dialog først.');

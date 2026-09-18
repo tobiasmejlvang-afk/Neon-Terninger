@@ -80,7 +80,7 @@ const label = value => value?.text?.trim() || (value?.imageId ? 'Billedside' : '
 const deferred = () => { let resolve; const promise = new Promise(done => { resolve = done; }); return {promise, resolve}; };
 const flush = async () => { await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); };
 
-function harness({faces = [face('', 'first'), face('', 'second')], outcome = 0, imageURL = async id => `blob:${id}`} = {}) {
+function harness({faces = [face('', 'first'), face('', 'second')], outcome = 0, imageURL = async id => `blob:${id}`, reducedMotion = false, storedEffects, scheduleTimeout = setTimeout} = {}) {
   const body = new Element('body'); body._root = true;
   const ids = new Map();
   const node = (id, parent = body, tag = 'div', cls = '') => {
@@ -96,6 +96,18 @@ function harness({faces = [face('', 'first'), face('', 'second')], outcome = 0, 
   for (const id of ['count-label', 'roll-label', 'roll-hint', 'progress-label', 'reveal-particles']) node(id, area);
   for (const value of ['dice', 'slot', 'wheel']) { const button = node('', area, 'button', 'board-choice'); button.dataset.board = value; }
   const storage = new Map([['neon-terninger-board-v1', 'wheel']]);
+  if (storedEffects !== undefined) storage.set('neon-terninger-effects-v1', storedEffects);
+  const mediaListeners = new Set();
+  const media = {
+    matches: reducedMotion,
+    addEventListener(type, callback) { if (type === 'change') mediaListeners.add(callback); },
+    addListener(callback) { mediaListeners.add(callback); }
+  };
+  const setReducedMotion = value => {
+    if (media.matches === value) return;
+    media.matches = value;
+    for (const callback of mediaListeners) callback({matches: value, media: '(prefers-reduced-motion: reduce)'});
+  };
   const document = {
     body, getElementById: id => ids.get(id) || null,
     createElement: tag => new Element(tag), createElementNS: (_namespace, tag) => new Element(tag),
@@ -104,8 +116,8 @@ function harness({faces = [face('', 'first'), face('', 'second')], outcome = 0, 
   const context = vm.createContext({
     window: {}, document,
     localStorage: {getItem: key => storage.get(key) || null, setItem: (key, value) => storage.set(key, String(value))},
-    matchMedia: () => ({matches: false, addEventListener() {}}),
-    setTimeout, clearTimeout, setInterval, clearInterval, requestAnimationFrame: callback => callback()
+    matchMedia: () => media,
+    setTimeout: scheduleTimeout, clearTimeout, setInterval, clearInterval, requestAnimationFrame: callback => callback()
   });
   vm.runInContext(boardSource, context, {filename: path.join(DOCS, 'boards.js')});
   const state = {
@@ -121,11 +133,105 @@ function harness({faces = [face('', 'first'), face('', 'second')], outcome = 0, 
     ui.render(state);
   };
   ui = context.window.NeonBoards.create({onChange: render, onSelect() {}, faceLabel: label, imageURL});
-  return {ui, state, document, render, get: id => ids.get(id), result: ids.get('board-result-media')};
+  return {ui, state, document, render, storage, setReducedMotion, get: id => ids.get(id), result: ids.get('board-result-media')};
 }
 
 const tests = [];
 const test = (name, run) => tests.push({name, run});
+
+const EFFECTS_KEY = 'neon-terninger-effects-v1';
+function assertEffects(h, expected, disabled = false) {
+  assert.equal(h.document.body.dataset.effects, expected, 'Effective motion setting');
+  assert.equal(h.get('effects-button').getAttribute('aria-pressed'), String(expected === 'full'), 'Accessible toggle state');
+  assert.equal(h.get('effects-button').disabled, disabled, 'Effects toggle availability');
+  assert.match(h.get('effects-button').textContent, expected === 'full' ? /Effekter til/ : /Effekter fra/);
+}
+
+test('Without an explicit choice effects follow OS changes and remain user-controllable', () => {
+  for (const storedEffects of [undefined, 'auto']) {
+    const h = harness({outcome: null, storedEffects});
+    h.render(); assertEffects(h, 'full');
+    h.setReducedMotion(true); assertEffects(h, 'quiet');
+    h.setReducedMotion(false); assertEffects(h, 'full');
+    assert.equal(h.storage.get(EFFECTS_KEY), storedEffects, 'OS changes must not save an explicit choice');
+  }
+});
+
+test('Explicit full effects override reduced OS motion and survive OS changes', () => {
+  const h = harness({outcome: null, storedEffects: 'full', reducedMotion: true});
+  h.render(); assertEffects(h, 'full');
+  h.setReducedMotion(false); assertEffects(h, 'full');
+  h.setReducedMotion(true); assertEffects(h, 'full');
+  assert.equal(h.storage.get(EFFECTS_KEY), 'full');
+});
+
+test('Explicit quiet effects remain quiet after reload and OS changes', () => {
+  const original = harness({outcome: null, storedEffects: 'quiet'});
+  original.render(); assertEffects(original, 'quiet');
+  original.setReducedMotion(true); assertEffects(original, 'quiet');
+  original.setReducedMotion(false); assertEffects(original, 'quiet');
+  const reloaded = harness({outcome: null, storedEffects: original.storage.get(EFFECTS_KEY)});
+  reloaded.render(); assertEffects(reloaded, 'quiet');
+});
+
+test('Clicking effects under reduced OS motion turns them on in one click and persists the choice', () => {
+  const h = harness({outcome: null, reducedMotion: true});
+  h.render(); assertEffects(h, 'quiet');
+  h.get('effects-button').dispatch('click');
+  assertEffects(h, 'full'); assert.equal(h.storage.get(EFFECTS_KEY), 'full');
+  const reloaded = harness({outcome: null, reducedMotion: true, storedEffects: h.storage.get(EFFECTS_KEY)});
+  reloaded.render(); assertEffects(reloaded, 'full');
+  h.get('effects-button').dispatch('click');
+  assertEffects(h, 'quiet'); assert.equal(h.storage.get(EFFECTS_KEY), 'quiet');
+  h.get('effects-button').dispatch('click');
+  assertEffects(h, 'full'); assert.equal(h.storage.get(EFFECTS_KEY), 'full');
+});
+
+test('Turning automatic full effects off saves quiet and subsequent OS changes do not undo it', () => {
+  const h = harness({outcome: null});
+  h.render(); assertEffects(h, 'full');
+  h.get('effects-button').dispatch('click');
+  assertEffects(h, 'quiet'); assert.equal(h.storage.get(EFFECTS_KEY), 'quiet');
+  h.setReducedMotion(true); assertEffects(h, 'quiet');
+  h.setReducedMotion(false); assertEffects(h, 'quiet');
+});
+
+test('The effects toggle is disabled only while busy and cannot change preferences during a roll', () => {
+  const h = harness({outcome: null, reducedMotion: true});
+  h.render(); assertEffects(h, 'quiet');
+  h.state.busy = true; h.render(); assertEffects(h, 'quiet', true);
+  // Invoke the listener directly as well: its busy guard must protect callers.
+  h.get('effects-button').dispatch('click'); assertEffects(h, 'quiet', true);
+  assert.equal(h.storage.has(EFFECTS_KEY), false);
+  h.setReducedMotion(false); assertEffects(h, 'full', true);
+  h.get('effects-button').dispatch('click'); assertEffects(h, 'full', true);
+  assert.equal(h.storage.has(EFFECTS_KEY), false);
+  h.state.busy = false; h.render(); assertEffects(h, 'full');
+  h.setReducedMotion(true); assertEffects(h, 'quiet');
+});
+
+test('An invalid stored effects preference safely falls back to the OS setting', () => {
+  const h = harness({outcome: null, reducedMotion: true, storedEffects: 'invalid-setting'});
+  h.render(); assertEffects(h, 'quiet');
+  h.setReducedMotion(false); assertEffects(h, 'full');
+});
+
+test('The effective effects preference controls real wheel spin duration', async () => {
+  for (const {storedEffects, reducedMotion, animated} of [
+    {storedEffects: undefined, reducedMotion: true, animated: false},
+    {storedEffects: undefined, reducedMotion: false, animated: true},
+    {storedEffects: 'full', reducedMotion: true, animated: true},
+    {storedEffects: 'quiet', reducedMotion: false, animated: false}
+  ]) {
+    const durations = [];
+    const h = harness({outcome: null, storedEffects, reducedMotion, scheduleTimeout: (callback, duration) => {
+      durations.push(duration); queueMicrotask(callback); return 0;
+    }});
+    h.render(); await h.ui.spin(0, 1, () => {});
+    assert.equal(durations.length, 1, 'Exactly one spin completion delay');
+    assert.equal(durations[0] > 1000, animated, `Unexpected spin duration for ${storedEffects || 'auto'} / OS reduce=${reducedMotion}`);
+  }
+});
 
 test('Image-only wheel outcome loads in the large panel with a numbered label', async () => {
   const pending = deferred();
@@ -225,14 +331,14 @@ test('Text-only outcomes keep the media panel empty and hidden', async () => {
   assert.equal(h.get('result-value').textContent, 'Tekst uden billede');
 });
 
-test('HTML and manifest assets exist and are included in the v8 offline cache', () => {
+test('HTML and manifest assets exist and are included in the v9 offline cache', () => {
   const html = fs.readFileSync(path.join(DOCS, 'index.html'), 'utf8');
   const manifest = JSON.parse(fs.readFileSync(path.join(DOCS, 'manifest.webmanifest'), 'utf8'));
   const sw = fs.readFileSync(path.join(DOCS, 'sw.js'), 'utf8');
   const swContext = vm.createContext({self: {addEventListener() {}}});
   vm.runInContext(sw + '\n;globalThis.audit = {CACHE, ASSETS};', swContext);
   const {CACHE, ASSETS} = swContext.audit;
-  assert.match(CACHE, /^neon-terninger-v8(?:-|$)/);
+  assert.match(CACHE, /^neon-terninger-v9(?:-|$)/);
   const urls = [...html.matchAll(/<(?:link|script)\b[^>]*(?:href|src)="(\.\/[^"?#]+)"/g)].map(match => match[1]);
   urls.push(...manifest.icons.map(icon => icon.src));
   for (const url of new Set([...urls, ...ASSETS])) {

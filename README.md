@@ -52,7 +52,7 @@ Ved fremtidige ændringer: opdater cacheversionen i `docs/sw.js`, så offlinefil
 
 Vælg mellem **Terninger**, **Lucky Slot** og **Spin-hjul**. Alle tre deler de samme redigerbare sider, billeder, spilpakker og resultater. Op til fire terninger/hjul kan bruges; kun ét animeres pr. handling. Hjulets markør og slotmaskinens midterlinje lander på det udtrukne felt. Identiske tekster forbliver separate felter med hver sin chance. Valg af spilleplade og effekter gemmes separat fra terningernes indhold.
 
-Temaet bruger dybrødt neon, sort krom, glans og glød. Knappen **Effekter til/fra** dæmper bevægelserne, og systemets reduceret-bevægelse-indstilling respekteres. Der er ingen lydafspilning.
+Temaet bruger dybrødt neon, sort krom, glans og glød. Appen følger som standard enhedens indstilling for reduceret bevægelse. Med **Effekter til/fra** kan du altid vælge animationerne til eller fra; dit eget valg går forud for enhedens indstilling og huskes på denne enhed. Der er ingen lydafspilning.
 
 Spin-hjulet viser billedresultater i et stort panel. Billedsider uden tekst får separate feltnumre, så de kan skelnes fra hinanden.
 
@@ -72,4 +72,4 @@ node tests/pack-regression.cjs
 node tests/board-regression.cjs
 ```
 
-De 38 kontroller kører de faktiske produktionsfunktioner med kontrollerede DOM- og lagergrænser. De dækker samtidig redigering, gemmefejl, fyldt lager, transaktionsfejl, backup/gendannelse, spilpakker, coverbehandling og billedresultater. Visuel browserkontrol supplerer disse tests.
+De 46 kontroller kører de faktiske produktionsfunktioner med kontrollerede DOM- og lagergrænser. De dækker samtidig redigering, gemmefejl, fyldt lager, transaktionsfejl, backup/gendannelse, spilpakker, coverbehandling, billedresultater og effektvalg ved reduceret bevægelse. Visuel browserkontrol supplerer disse tests.

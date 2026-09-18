@@ -537,6 +537,8 @@ body[data-effects="quiet"] *::before,
 body[data-effects="quiet"] *::after { animation: none !important; transition-duration: 0s !important; }
 body[data-effects="quiet"] .reveal-particles { display: none; }
 @media (prefers-reduced-motion: reduce) {
-  .reveal-particles { display: none; }
-  *, *::before, *::after { animation: none !important; transition-duration: 0s !important; scroll-behavior: auto !important; }
+  body:not([data-effects="full"]) .reveal-particles { display: none; }
+  body:not([data-effects="full"]) *,
+  body:not([data-effects="full"]) *::before,
+  body:not([data-effects="full"]) *::after { animation: none !important; transition-duration: 0s !important; scroll-behavior: auto !important; }
 }
