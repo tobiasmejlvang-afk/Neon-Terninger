@@ -7,21 +7,33 @@
   const $=id=>document.getElementById(id), clone=v=>JSON.parse(JSON.stringify(v));
   const readJSON=key=>{try{return JSON.parse(localStorage.getItem(key)||'null');}catch{return null;}};
   const uid=prefix=>`${prefix}-${crypto.randomUUID?crypto.randomUUID():`${Date.now()}-${Math.random().toString(16).slice(2)}`}`;
-  const req=request=>new Promise((resolve,reject)=>{request.onsuccess=()=>resolve(request.result);request.onerror=()=>reject(request.error||new Error('Lagerfejl'));});
   const openDB=(name,version,upgrade)=>new Promise((resolve,reject)=>{const r=indexedDB.open(name,version);r.onupgradeneeded=()=>upgrade(r.result);r.onsuccess=()=>resolve(r.result);r.onerror=()=>reject(r.error||new Error('Kunne ikke åbne lokalt lager.'));});
   const packDB=()=>openDB(PACK_DB,1,db=>{if(!db.objectStoreNames.contains(PACK_STORE))db.createObjectStore(PACK_STORE,{keyPath:'id'});});
   const mediaDB=()=>openDB(MEDIA_DB,1,db=>{if(!db.objectStoreNames.contains(MEDIA_STORE))db.createObjectStore(MEDIA_STORE);});
-  async function action(dbPromise,storeName,mode,fn){const db=await dbPromise;return req(fn(db.transaction(storeName,mode).objectStore(storeName)));}
+  async function action(dbPromise,storeName,mode,fn){
+    const db=await dbPromise;
+    return new Promise((resolve,reject)=>{
+      let tx,request;
+      try{
+        tx=db.transaction(storeName,mode);
+        tx.oncomplete=()=>{db.close();resolve(request.result);};
+        tx.onabort=()=>{db.close();reject(tx.error||request?.error||new Error('Ændringen kunne ikke gemmes.'));};
+        request=fn(tx.objectStore(storeName));
+      }catch(error){if(tx)try{tx.abort();}catch{}db.close();reject(error);}
+    });
+  }
   const packs={all:()=>action(packDB(),PACK_STORE,'readonly',s=>s.getAll()),get:id=>action(packDB(),PACK_STORE,'readonly',s=>s.get(id)),put:p=>action(packDB(),PACK_STORE,'readwrite',s=>s.put(p)),del:id=>action(packDB(),PACK_STORE,'readwrite',s=>s.delete(id))};
   const media={get:id=>action(mediaDB(),MEDIA_STORE,'readonly',s=>s.get(id)),put:(id,blob)=>action(mediaDB(),MEDIA_STORE,'readwrite',s=>s.put(blob,id))};
   const defaultMeta=()=>({description:'',icon:'◇',color:COLORS[0],cover:null});
   const blankConfig=()=>({version:2,count:4,dice:Array.from({length:4},(_,i)=>({name:`Terning ${i+1}`,faces:[{text:'Side 1',imageId:''},{text:'Side 2',imageId:''}]}))});
   const packMeta=p=>({...defaultMeta(),description:typeof p?.description==='string'?p.description:'',icon:ICONS.includes(p?.icon)?p.icon:'◇',color:COLORS.includes(p?.color)?p.color:COLORS[0],cover:p?.cover instanceof Blob?p.cover:null});
 
-  async function collectImages(config){const images=[],seen=new Set();for(const die of config.dice)for(const face of die.faces){if(!face.imageId||seen.has(face.imageId))continue;seen.add(face.imageId);const blob=await media.get(face.imageId).catch(()=>null);if(blob)images.push({sourceId:face.imageId,blob});else{face.imageId='';if(!face.text?.trim())face.text='Billede mangler';}}return images;}
+  async function collectImages(config){const images=[],seen=new Set();for(const die of config.dice)for(const face of die.faces){if(!face.imageId||seen.has(face.imageId))continue;seen.add(face.imageId);const blob=await media.get(face.imageId);if(blob)images.push({sourceId:face.imageId,blob});else{face.imageId='';if(!face.text?.trim())face.text='Billede mangler';}}return images;}
   async function snapshotCurrent(name,existingId=''){
     const config=readJSON(CONFIG_KEY);if(!config?.dice||config.version!==2)throw new Error('Det aktive terningesæt kunne ikke læses.');
-    const old=existingId?await packs.get(existingId).catch(()=>null):null,savedConfig=clone(config),images=await collectImages(savedConfig),now=Date.now(),meta=packMeta(old);
+    const old=existingId?await packs.get(existingId):null;
+    if(existingId&&!old)throw new Error('Spilpakken findes ikke længere.');
+    const savedConfig=clone(config),images=await collectImages(savedConfig),now=Date.now(),meta=packMeta(old);
     return {id:existingId||uid('pack'),name:name.trim(),...meta,createdAt:old?.createdAt||now,updatedAt:now,config:savedConfig,images};
   }
   async function saveCurrent(name,existingId=''){const clean=name.trim();if(!clean)throw new Error('Giv pakken et navn.');if(clean.length>40)throw new Error('Navnet må højst være 40 tegn.');const pack=await snapshotCurrent(clean,existingId);await packs.put(pack);localStorage.setItem(ACTIVE_KEY,pack.id);return pack;}
@@ -39,21 +51,46 @@
   function fmt(time){try{return new Intl.DateTimeFormat('da-DK',{day:'2-digit',month:'2-digit',year:'numeric'}).format(new Date(time));}catch{return'';}}
   function flash(text){const n=document.createElement('div');n.className='pack-toast';n.textContent=text;document.body.append(n);requestAnimationFrame(()=>n.classList.add('show'));setTimeout(()=>{n.classList.remove('show');setTimeout(()=>n.remove(),250);},1800);}
 
-  let libraryDialog,designerDialog,designer={pack:null,config:null,cover:null,icon:'◇',color:COLORS[0],source:'current'};
+  let libraryDialog,designerDialog,designer=null;
+  const currentDesigner=session=>designer===session&&!session.closed;
+  function updateDesignerControls(){
+    if(!designerDialog||!designer)return;
+    const saving=designer.saving,uploading=Boolean(designer.coverPending);
+    designerDialog.querySelectorAll('button,input,textarea,select').forEach(control=>{control.disabled=saving||control.dataset.edgeDisabled==='true';});
+    ['choose-cover','designer-cover-input','remove-cover'].forEach(id=>{$(id).disabled=saving||uploading;});
+    designerDialog.setAttribute('aria-busy',String(saving||uploading));
+  }
+  function closeDesigner(){
+    if(!designer||designer.saving)return false;
+    designer.closed=true;designer.coverRevision++;designerDialog.close();return true;
+  }
   function buildLibrary(){
     const d=document.createElement('dialog');d.id='pack-dialog';d.setAttribute('aria-labelledby','pack-title');
-    d.innerHTML=`<div class="dialog-heading"><div><span class="eyebrow">DIT BIBLIOTEK</span><h2 id="pack-title">Spilpakker</h2></div><button class="icon-button" id="close-packs" aria-label="Luk">×</button></div><p class="muted pack-intro">Gem komplette sæt og giv hver pakke sit eget cover, ikon, farve og udtryk.</p><div class="pack-top-actions"><button id="design-pack" class="primary-button" type="button">✦ Design ny pakke</button><span>eller gem de aktive terninger direkte</span></div><section class="pack-save"><div><label class="field-label" for="pack-name">Hurtig gem</label><input id="pack-name" maxlength="40" placeholder="Fx Date Night"></div><button id="save-pack" class="secondary-button" type="button">Gem nuværende sæt</button><div class="pack-suggestions"><button type="button">Date Night</button><button type="button">Weekend</button><button type="button">Hotel</button><button type="button">Vores favoritter</button></div><p id="pack-error" class="form-error"></p></section><div class="pack-list-heading"><div><span class="eyebrow">GEMTE PAKKER</span><strong id="pack-count">0 pakker</strong></div><span class="muted">Lokalt på denne enhed</span></div><div id="pack-list" class="pack-list"></div>`;
+    d.innerHTML=`<div class="dialog-heading"><div><span class="eyebrow">DIT BIBLIOTEK</span><h2 id="pack-title">Spilpakker</h2></div><button class="icon-button" id="close-packs" aria-label="Luk">×</button></div><p class="muted pack-intro">Gem komplette sæt og giv hver pakke sit eget cover, ikon, farve og udtryk.</p><div class="pack-top-actions"><button id="design-pack" class="primary-button" type="button">✦ Design ny pakke</button><span>eller gem de aktive terninger direkte</span></div><section class="pack-save"><div><label class="field-label" for="pack-name">Hurtig gem</label><input id="pack-name" maxlength="40" placeholder="Fx Date Night"></div><button id="save-pack" class="secondary-button" type="button">Gem nuværende sæt</button><div class="pack-suggestions"><button type="button">Date Night</button><button type="button">Weekend</button><button type="button">Hotel</button><button type="button">Vores favoritter</button></div><p id="pack-error" class="form-error" role="alert"></p></section><div class="pack-list-heading"><div><span class="eyebrow">GEMTE PAKKER</span><strong id="pack-count">0 pakker</strong></div><span class="muted">Lokalt på denne enhed</span></div><div id="pack-list" class="pack-list"></div>`;
     document.body.append(d);$('close-packs').onclick=()=>d.close();d.addEventListener('click',e=>{if(e.target===d)d.close();});
     d.querySelectorAll('.pack-suggestions button').forEach(b=>b.onclick=()=>{$('pack-name').value=b.textContent;$('pack-name').focus();});
     $('design-pack').onclick=()=>openDesigner();$('save-pack').onclick=async()=>{const b=$('save-pack'),error=$('pack-error');error.textContent='';b.disabled=true;try{const saved=await saveCurrent($('pack-name').value);$('pack-name').value='';await renderList();flash(`“${saved.name}” er gemt.`);}catch(e){error.textContent=e.message||'Pakken kunne ikke gemmes.';}finally{b.disabled=false;}};return d;
   }
   function buildDesigner(){
     const d=document.createElement('dialog');d.id='designer-dialog';d.setAttribute('aria-labelledby','designer-title');
-    d.innerHTML=`<div class="dialog-heading"><div><span class="eyebrow">SPILPAKKE-DESIGNER</span><h2 id="designer-title">Design spilpakke</h2></div><button class="icon-button" id="close-designer" aria-label="Luk">×</button></div><div class="designer-layout"><section class="designer-preview"><div id="designer-cover" class="designer-cover"><span id="designer-cover-icon">◇</span><div><small>NEON TERNINGER</small><strong id="designer-preview-name">Ny spilpakke</strong><p id="designer-preview-desc">Jeres helt eget sæt.</p></div></div><label class="cover-button">＋ Vælg coverbillede<input id="designer-cover-input" type="file" accept="image/*" hidden></label><button id="remove-cover" class="text-button" type="button">Fjern cover</button></section><section class="designer-fields"><label class="field-label" for="designer-name">Navn</label><input id="designer-name" maxlength="40" placeholder="Fx Date Night"><label class="field-label" for="designer-desc">Beskrivelse</label><textarea id="designer-desc" maxlength="140" rows="3" placeholder="Kort beskrivelse af stemningen"></textarea><div class="designer-choice"><span class="field-label">Ikon</span><div id="designer-icons" class="designer-icons"></div></div><div class="designer-choice"><span class="field-label">Farve</span><div id="designer-colors" class="designer-colors"></div></div><div id="designer-source-wrap"><span class="field-label">Start med</span><div class="designer-source"><button data-source="current" type="button">Nuværende sæt</button><button data-source="blank" type="button">Tom pakke</button></div></div><div class="designer-count"><label class="field-label" for="designer-count">Aktive terninger</label><select id="designer-count"><option>1</option><option>2</option><option>3</option><option selected>4</option></select></div></section></div><section class="designer-order"><div><span class="eyebrow">RÆKKEFØLGE</span><h3>Arrangér terningerne</h3></div><div id="designer-dice"></div></section><p id="designer-error" class="form-error"></p><div class="dialog-footer"><button id="cancel-designer" class="secondary-button" type="button">Annuller</button><button id="save-design" class="primary-button" type="button">Gem design <span>✓</span></button></div>`;
-    document.body.append(d);$('close-designer').onclick=$('cancel-designer').onclick=()=>d.close();
+    d.innerHTML=`<div class="dialog-heading"><div><span class="eyebrow">SPILPAKKE-DESIGNER</span><h2 id="designer-title">Design spilpakke</h2></div><button class="icon-button" id="close-designer" aria-label="Luk">×</button></div><div class="designer-layout"><section class="designer-preview"><div id="designer-cover" class="designer-cover"><span id="designer-cover-icon">◇</span><div><small>NEON TERNINGER</small><strong id="designer-preview-name">Ny spilpakke</strong><p id="designer-preview-desc">Jeres helt eget sæt.</p></div></div><button id="choose-cover" class="cover-button" type="button">＋ Vælg coverbillede</button><input id="designer-cover-input" type="file" accept="image/*" hidden><button id="remove-cover" class="text-button" type="button" hidden>Fjern cover</button></section><section class="designer-fields"><label class="field-label" for="designer-name">Navn</label><input id="designer-name" maxlength="40" placeholder="Fx Date Night"><label class="field-label" for="designer-desc">Beskrivelse</label><textarea id="designer-desc" maxlength="140" rows="3" placeholder="Kort beskrivelse af stemningen"></textarea><div class="designer-choice"><span class="field-label">Ikon</span><div id="designer-icons" class="designer-icons"></div></div><div class="designer-choice"><span class="field-label">Farve</span><div id="designer-colors" class="designer-colors"></div></div><div id="designer-source-wrap"><span class="field-label">Start med</span><div class="designer-source"><button data-source="current" type="button">Nuværende sæt</button><button data-source="blank" type="button">Tom pakke</button></div></div><div class="designer-count"><label class="field-label" for="designer-count">Aktive terninger</label><select id="designer-count"><option>1</option><option>2</option><option>3</option><option selected>4</option></select></div></section></div><section class="designer-order"><div><span class="eyebrow">RÆKKEFØLGE</span><h3>Arrangér terningerne</h3></div><div id="designer-dice"></div></section><p id="designer-error" class="form-error" role="status" aria-live="polite"></p><div class="dialog-footer"><button id="cancel-designer" class="secondary-button" type="button">Annuller</button><button id="save-design" class="primary-button" type="button">Gem design <span>✓</span></button></div>`;
+    document.body.append(d);$('close-designer').onclick=$('cancel-designer').onclick=closeDesigner;
+    d.addEventListener('cancel',event=>{event.preventDefault();closeDesigner();});
+    d.addEventListener('close',()=>{if(!d.open&&designer){designer.closed=true;designer.coverRevision++;}});
     $('designer-name').oninput=paintDesigner;$('designer-desc').oninput=paintDesigner;$('designer-count').onchange=()=>{designer.config.count=Number($('designer-count').value);paintDesigner();};
-    $('designer-cover-input').onchange=async e=>{try{if(e.target.files[0]){designer.cover=await prepareCover(e.target.files[0]);paintDesigner();}}catch(err){$('designer-error').textContent=err.message;}e.target.value='';};
-    $('remove-cover').onclick=()=>{designer.cover=null;paintDesigner();};
+    $('choose-cover').onclick=()=>{if(designer&&!designer.saving&&!designer.coverPending)$('designer-cover-input').click();};
+    $('designer-cover-input').onchange=async event=>{
+      const input=event.currentTarget||event.target,file=input.files?.[0],session=designer;input.value='';
+      if(!file||!session||session.closed||session.saving||session.coverPending)return;
+      const revision=++session.coverRevision,pending=prepareCover(file);session.coverPending=pending;
+      $('designer-error').textContent='Optimerer coverbilledet…';updateDesignerControls();
+      try{
+        const cover=await pending;
+        if(currentDesigner(session)&&revision===session.coverRevision){session.cover=cover;if(!session.saving)$('designer-error').textContent='';paintDesigner();}
+      }catch(error){if(currentDesigner(session)&&revision===session.coverRevision)$('designer-error').textContent=error.message||'Coverbilledet kunne ikke læses.';}
+      finally{if(currentDesigner(session)&&revision===session.coverRevision){session.coverPending=null;updateDesignerControls();}}
+    };
+    $('remove-cover').onclick=()=>{if(designer.saving||designer.coverPending)return;designer.cover=null;paintDesigner();};
     d.querySelectorAll('[data-source]').forEach(b=>b.onclick=()=>{designer.source=b.dataset.source;designer.config=designer.source==='blank'?blankConfig():clone(readJSON(CONFIG_KEY)||blankConfig());$('designer-count').value=designer.config.count;paintDesigner();});
     $('save-design').onclick=saveDesign;return d;
   }
@@ -62,14 +99,36 @@
     $('designer-icons').replaceChildren(...ICONS.map(icon=>{const b=document.createElement('button');b.type='button';b.textContent=icon;b.className=designer.icon===icon?'selected':'';b.onclick=()=>{designer.icon=icon;paintDesigner();};return b;}));
     $('designer-colors').replaceChildren(...COLORS.map(color=>{const b=document.createElement('button');b.type='button';b.style.background=color;b.className=designer.color===color?'selected':'';b.setAttribute('aria-label',`Vælg farve ${color}`);b.onclick=()=>{designer.color=color;paintDesigner();};return b;}));
     designerDialog.querySelectorAll('[data-source]').forEach(b=>b.classList.toggle('selected',b.dataset.source===designer.source));
-    const order=$('designer-dice');order.replaceChildren();designer.config.dice.forEach((die,i)=>{const row=document.createElement('div');row.className=`designer-die${i>=designer.config.count?' inactive':''}`;const text=document.createElement('div');text.innerHTML=`<span>${String(i+1).padStart(2,'0')}</span><strong></strong><small>${die.faces.length} sider${i>=designer.config.count?' · inaktiv':''}</small>`;text.querySelector('strong').textContent=die.name;const controls=document.createElement('div');[['↑',-1],['↓',1]].forEach(([label,dir])=>{const b=document.createElement('button');b.type='button';b.textContent=label;b.disabled=(dir<0&&i===0)||(dir>0&&i===designer.config.dice.length-1);b.onclick=()=>{const j=i+dir,[moved]=designer.config.dice.splice(i,1);designer.config.dice.splice(j,0,moved);paintDesigner();};controls.append(b);});row.append(text,controls);order.append(row);});
+    const order=$('designer-dice');order.replaceChildren();designer.config.dice.forEach((die,i)=>{const row=document.createElement('div');row.className=`designer-die${i>=designer.config.count?' inactive':''}`;const text=document.createElement('div');text.innerHTML=`<span>${String(i+1).padStart(2,'0')}</span><strong></strong><small>${die.faces.length} sider${i>=designer.config.count?' · inaktiv':''}</small>`;text.querySelector('strong').textContent=die.name;const controls=document.createElement('div');[['↑',-1],['↓',1]].forEach(([label,dir])=>{const b=document.createElement('button');b.type='button';b.textContent=label;b.dataset.edgeDisabled=String((dir<0&&i===0)||(dir>0&&i===designer.config.dice.length-1));b.onclick=()=>{const j=i+dir,[moved]=designer.config.dice.splice(i,1);designer.config.dice.splice(j,0,moved);paintDesigner();};controls.append(b);});row.append(text,controls);order.append(row);});
+    updateDesignerControls();
   }
   async function openDesigner(pack=null){
-    if(!designerDialog)designerDialog=buildDesigner();$('designer-error').textContent='';designer.pack=pack;designer.source=pack?'saved':'current';const meta=packMeta(pack);designer.icon=meta.icon;designer.color=meta.color;designer.cover=meta.cover;designer.config=pack?clone(pack.config):clone(readJSON(CONFIG_KEY)||blankConfig());$('designer-name').value=pack?.name||'';$('designer-desc').value=meta.description;$('designer-count').value=designer.config.count;$('designer-source-wrap').hidden=Boolean(pack);$('designer-title').textContent=pack?'Rediger pakkedesign':'Design ny spilpakke';paintDesigner();designerDialog.showModal();
+    if(designer?.saving)return false;
+    if(!designerDialog)designerDialog=buildDesigner();
+    if(designer)designer.closed=true;
+    const meta=packMeta(pack);
+    designer={pack,source:pack?'saved':'current',...meta,config:pack?clone(pack.config):clone(readJSON(CONFIG_KEY)||blankConfig()),saving:false,closed:false,coverPending:null,coverRevision:0};
+    $('designer-error').textContent='';$('designer-name').value=pack?.name||'';$('designer-desc').value=meta.description;$('designer-count').value=designer.config.count;$('designer-source-wrap').hidden=Boolean(pack);$('designer-title').textContent=pack?'Rediger pakkedesign':'Design ny spilpakke';paintDesigner();designerDialog.showModal();return true;
   }
   async function saveDesign(){
-    const button=$('save-design'),error=$('designer-error'),name=$('designer-name').value.trim(),description=$('designer-desc').value.trim();error.textContent='';if(!name){error.textContent='Giv pakken et navn.';return;}button.disabled=true;
-    try{let images=designer.pack?.images||[];if(!designer.pack&&designer.source==='current')images=await collectImages(designer.config);const now=Date.now(),pack={id:designer.pack?.id||uid('pack'),name,description,icon:designer.icon,color:designer.color,cover:designer.cover,createdAt:designer.pack?.createdAt||now,updatedAt:now,config:clone(designer.config),images};await packs.put(pack);designerDialog.close();await renderList();flash(designer.pack?'Pakkedesignet er opdateret.':'Ny spilpakke er oprettet.');}catch(err){error.textContent=err.message||'Designet kunne ikke gemmes.';}finally{button.disabled=false;}
+    const session=designer;if(!session||session.closed||session.saving)return;
+    const error=$('designer-error'),name=$('designer-name').value.trim(),description=$('designer-desc').value.trim();
+    error.textContent='';if(!name||name.length>40){error.textContent='Giv pakken et navn på 1–40 tegn.';return;}
+    const editing=Boolean(session.pack),source=session.source,pendingCover=session.coverPending,now=Date.now();
+    const pack={id:session.pack?.id||uid('pack'),name,description,icon:session.icon,color:session.color,cover:session.cover,createdAt:session.pack?.createdAt||now,updatedAt:now,config:clone(session.config),images:(session.pack?.images||[]).map(image=>({...image}))};
+    session.saving=true;error.textContent='Gemmer spilpakken…';updateDesignerControls();
+    try{
+      if(pendingCover)pack.cover=await pendingCover;
+      if(!currentDesigner(session))return;
+      if(!editing&&source==='current')pack.images=await collectImages(pack.config);
+      if(!currentDesigner(session))return;
+      await packs.put(pack);
+      if(!currentDesigner(session))return;
+      session.closed=true;designerDialog.close();
+      try{await renderList();}catch{flash('Pakken er gemt, men biblioteket kunne ikke opdateres. Åbn det igen.');return;}
+      flash(editing?'Pakkedesignet er opdateret.':'Ny spilpakke er oprettet.');
+    }catch(err){if(currentDesigner(session))error.textContent=err.message||'Designet kunne ikke gemmes.';}
+    finally{session.saving=false;if(currentDesigner(session))updateDesignerControls();}
   }
   async function renderList(){
     const list=$('pack-list');if(!list)return;clearCoverURLs();list.replaceChildren();const active=localStorage.getItem(ACTIVE_KEY),all=(await packs.all()).sort((a,b)=>b.updatedAt-a.updatedAt);$('pack-count').textContent=`${all.length} ${all.length===1?'pakke':'pakker'}`;
@@ -77,7 +136,11 @@
     all.forEach(pack=>{const meta=packMeta(pack),card=document.createElement('article');card.className=`pack-card${pack.id===active?' is-active':''}`;card.style.setProperty('--pack-color',meta.color);const imageCount=(pack.images||[]).length,sideCount=pack.config.dice.slice(0,pack.config.count).reduce((n,d)=>n+d.faces.length,0),cover=meta.cover?coverURL(meta.cover):'';
       card.innerHTML=`<div class="pack-card-main"><div class="pack-art"><span class="pack-icon"></span></div><div class="pack-copy"><div class="pack-name-row"><h3></h3>${pack.id===active?'<span>AKTIV</span>':''}</div><p class="pack-description"></p><small>${pack.config.count} terninger · ${sideCount} sider${imageCount?` · ${imageCount} billeder`:''} · ${fmt(pack.updatedAt)}</small></div></div><div class="pack-card-actions"><button class="pack-load" type="button">Brug pakke</button><button class="pack-edit-design" type="button">Design</button><button class="pack-more" type="button">•••</button></div><div class="pack-secondary" hidden><button data-action="update" type="button">Gem nuværende oveni</button><button data-action="rename" type="button">Omdøb</button><button data-action="delete" class="danger" type="button">Slet</button></div>`;
       const art=card.querySelector('.pack-art');if(cover)art.style.backgroundImage=`linear-gradient(0deg,#12081288,#12081218),url("${cover}")`;art.querySelector('.pack-icon').textContent=meta.icon;card.querySelector('h3').textContent=pack.name;card.querySelector('.pack-description').textContent=meta.description||'Personlig spilpakke';
-      card.querySelector('.pack-load').onclick=async e=>{e.currentTarget.disabled=true;try{await loadPack(pack.id);}catch(err){flash(err.message||'Kunne ikke åbne pakken.');e.currentTarget.disabled=false;}};card.querySelector('.pack-edit-design').onclick=()=>openDesigner(pack);const sec=card.querySelector('.pack-secondary');card.querySelector('.pack-more').onclick=()=>sec.hidden=!sec.hidden;
+      card.querySelector('.pack-load').onclick=async event=>{
+        const button=event.currentTarget,error=$('pack-error');button.disabled=true;error.textContent='';
+        try{await loadPack(pack.id);}catch(err){error.textContent=err.message||'Kunne ikke åbne pakken.';flash(error.textContent);}
+        finally{button.disabled=false;}
+      };card.querySelector('.pack-edit-design').onclick=()=>openDesigner(pack);const sec=card.querySelector('.pack-secondary');card.querySelector('.pack-more').onclick=()=>sec.hidden=!sec.hidden;
       sec.querySelector('[data-action="update"]').onclick=async()=>{if(!confirm(`Erstat terningerne i “${pack.name}” med det aktive sæt? Designet bevares.`))return;try{await saveCurrent(pack.name,pack.id);await renderList();flash('Pakken er opdateret.');}catch(err){flash(err.message||'Kunne ikke opdatere.');}};
       sec.querySelector('[data-action="rename"]').onclick=async()=>{const name=prompt('Nyt navn:',pack.name);if(name===null)return;const clean=name.trim();if(!clean||clean.length>40){flash('Navnet skal være 1–40 tegn.');return;}pack.name=clean;pack.updatedAt=Date.now();await packs.put(pack);await renderList();};
       sec.querySelector('[data-action="delete"]').onclick=async()=>{if(!confirm(`Slet “${pack.name}”? Det kan ikke fortrydes.`))return;await packs.del(pack.id);if(active===pack.id)localStorage.removeItem(ACTIVE_KEY);await renderList();flash('Pakken er slettet.');};list.append(card);});

@@ -53,6 +53,21 @@
       if (!url || token !== paint || !container.isConnected) return;
       const image = el('img', className); image.src = url; image.alt = face.text || 'Billedside'; container.prepend(image);
     }
+    async function paintWheelResult(face, index) {
+      const container = $('board-result-media'), token = paint;
+      container.hidden = false;
+      container.append(el('p', 'result-media-note', 'Indlæser billedet…'));
+      const url = await imageURL(face.imageId);
+      if (token !== paint || !container.isConnected) return;
+      container.replaceChildren();
+      if (!url) { container.append(el('p', 'result-media-note', 'Billedet kunne ikke indlæses.')); return; }
+      const image = el('img', 'wheel-result-image');
+      image.alt = face.text.trim() || `Billedside ${index + 1}`;
+      image.addEventListener('error', () => {
+        if (token === paint && container.isConnected) container.replaceChildren(el('p', 'result-media-note', 'Billedet kunne ikke indlæses.'));
+      }, {once: true});
+      image.src = url; container.append(image);
+    }
     function cell(face) {
       const node = el('div', 'reel-cell');
       const label = face ? faceLabel(face) : '✦';
@@ -86,8 +101,8 @@
         const group = svg('g', {}), path = svg('path', {d:`M 200 200 L ${a.x} ${a.y} A 190 190 0 ${step > 180 ? 1 : 0} 1 ${b.x} ${b.y} Z`, class:'wheel-sector', fill:i % 2 === 0 ? '#8c0925' : '#210b12', stroke:'#ff47564d', 'stroke-width':'1'});
         const position = polar(count > 12 ? 151 : 139, i * step);
         const text = svg('text', {x:position.x, y:position.y, 'text-anchor':'middle', 'dominant-baseline':'middle', transform:`rotate(${i * step}, ${position.x}, ${position.y})`, class:'wheel-label', 'font-size':count > 12 ? '11' : '13'});
-        const label = faceLabel(face), maxLetters = count > 12 ? 6 : count > 8 ? 8 : 12;
-        text.textContent = [...label].length > maxLetters ? [...label].slice(0,maxLetters - 1).join('') + '…' : label;
+        const label = face.imageId && !face.text.trim() ? `Billede ${i + 1}` : faceLabel(face), maxLetters = count > 12 ? 6 : count > 8 ? 8 : 12;
+        text.textContent = face.imageId && !face.text.trim() && count > 8 ? `#${i + 1}` : [...label].length > maxLetters ? [...label].slice(0,maxLetters - 1).join('') + '…' : label;
         const title = svg('title', {}); title.textContent = `${i + 1}. ${label}`;
         group.append(title, path, text); disc.append(group);
       });
@@ -104,6 +119,12 @@
       $('board-surface').hidden = mode === 'dice'; $('board-surface').replaceChildren();
       if (mode === 'slot') $('board-surface').append(makeSlots());
       if (mode === 'wheel') $('board-surface').append(makeWheel());
+      const resultMedia = $('board-result-media'), result = state.results[state.selected];
+      resultMedia.hidden = true; resultMedia.replaceChildren();
+      if (mode === 'wheel' && !state.busy && result?.imageId) {
+        void paintWheelResult(result, state.resultIndices[state.selected]);
+        if (!result.text.trim()) $('result-value').textContent = `Billedside ${state.resultIndices[state.selected] + 1}`;
+      }
       $('count-label').textContent = mode === 'dice' ? 'Antal terninger' : 'Antal hjul';
       const die = state.config.dice[state.next];
       $('roll-label').textContent = state.busy ? (mode === 'dice' ? 'Terningen ruller…' : 'Hjulet ruller…') : mode === 'dice' ? `Slå ${state.results[state.next] ? 'igen med' : 'med'} ${die.name}` : mode === 'slot' ? `Rul hjul ${state.next + 1} · ${die.name}` : `Spin · ${die.name}`;

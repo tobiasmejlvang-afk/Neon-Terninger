@@ -6,6 +6,7 @@
   const $ = id => document.getElementById(id);
   const face = text => ({text, imageId: ''});
   const die = (name, values) => ({name, faces: values.map(face)});
+  const validConfig = data => data && data.version === 2 && Number.isInteger(data.count) && data.count >= 1 && data.count <= 4 && Array.isArray(data.dice) && data.dice.length === 4 && data.dice.every(d => d && typeof d.name === 'string' && d.name.trim() && d.name.length <= 30 && Array.isArray(d.faces) && d.faces.length >= 2 && d.faces.length <= 20 && d.faces.every(f => f && typeof f.text === 'string' && f.text.length <= 160 && typeof f.imageId === 'string' && f.imageId.length <= 100 && (f.text.trim() || f.imageId)));
 
   const MODES = {
     romantic: {
@@ -51,6 +52,16 @@
   const current = readJSON(MODE_KEY, {id: 'custom'});
   if (current?.id && MODES[current.id]) document.body.dataset.intensity = current.id;
 
+  function saveConfigAndMode(config, mode) {
+    if (!validConfig(config)) return false;
+    let previousMode;
+    try { previousMode = localStorage.getItem(MODE_KEY); } catch { return false; }
+    if (!writeJSON(MODE_KEY, mode)) return false;
+    if (writeJSON(CONFIG_KEY, config)) return true;
+    try { if (previousMode === null) localStorage.removeItem(MODE_KEY); else localStorage.setItem(MODE_KEY, previousMode); } catch {}
+    return false;
+  }
+
   function makeDialog() {
     const dialog = document.createElement('dialog');
     dialog.id = 'mode-dialog'; dialog.setAttribute('aria-labelledby', 'mode-title');
@@ -82,9 +93,17 @@
     const mode = MODES[id]; if (!mode) return;
     const existing = readJSON(CONFIG_KEY);
     const cameFromPreset = Boolean(MODES[current?.id]);
-    if (existing?.version === 2 && !cameFromPreset && !localStorage.getItem(BACKUP_KEY)) writeJSON(BACKUP_KEY, existing);
+    if (!validConfig(existing)) { alert('De nuværende terninger kunne ikke læses sikkert. Gem et gyldigt sæt, før du skifter spiltilstand.'); return; }
+    let hasBackup;
+    try {
+      const backup = localStorage.getItem(BACKUP_KEY); hasBackup = Boolean(backup);
+      if (hasBackup && !validConfig(JSON.parse(backup))) { alert('Backuppen kunne ikke læses sikkert. Dine nuværende terninger er bevaret.'); return; }
+    } catch { alert('Browseren kunne ikke læse lageret sikkert. Dine nuværende terninger er bevaret.'); return; }
+    if (!cameFromPreset && !hasBackup && !writeJSON(BACKUP_KEY, existing)) {
+      alert('Der er ikke plads til en backup af dine terninger. Spiltilstanden er ikke ændret.'); return;
+    }
     const config = {version: 2, count: 4, dice: mode.dice};
-    if (!writeJSON(CONFIG_KEY, config) || !writeJSON(MODE_KEY, {id, name: mode.name, appliedAt: Date.now()})) {
+    if (!saveConfigAndMode(config, {id, name: mode.name, appliedAt: Date.now()})) {
       alert('Browseren kunne ikke gemme spiltilstanden. Kontroller at lokal lagring er tilladt.'); return;
     }
     dialog.close(); location.reload();
@@ -92,8 +111,8 @@
 
   function restoreCustom(dialog) {
     const backup = readJSON(BACKUP_KEY);
-    if (!backup?.dice) return;
-    if (!writeJSON(CONFIG_KEY, backup) || !writeJSON(MODE_KEY, {id: 'custom', name: 'Mit eget sæt', appliedAt: Date.now()})) return;
+    if (!validConfig(backup)) { alert('Backuppen kunne ikke læses som et gyldigt sæt. Dine nuværende terninger er bevaret.'); return; }
+    if (!saveConfigAndMode(backup, {id: 'custom', name: 'Mit eget sæt', appliedAt: Date.now()})) { alert('Browseren kunne ikke gendanne terningerne. Backuppen er bevaret.'); return; }
     try { localStorage.removeItem(BACKUP_KEY); } catch {}
     dialog.close(); location.reload();
   }

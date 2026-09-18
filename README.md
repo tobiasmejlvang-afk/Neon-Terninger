@@ -53,3 +53,23 @@ Ved fremtidige ændringer: opdater cacheversionen i `docs/sw.js`, så offlinefil
 Vælg mellem **Terninger**, **Lucky Slot** og **Spin-hjul**. Alle tre deler de samme redigerbare sider, billeder, spilpakker og resultater. Op til fire terninger/hjul kan bruges; kun ét animeres pr. handling. Hjulets markør og slotmaskinens midterlinje lander på det udtrukne felt. Identiske tekster forbliver separate felter med hver sin chance. Valg af spilleplade og effekter gemmes separat fra terningernes indhold.
 
 Temaet bruger dybrødt neon, sort krom, glans og glød. Knappen **Effekter til/fra** dæmper bevægelserne, og systemets reduceret-bevægelse-indstilling respekteres. Der er ingen lydafspilning.
+
+Spin-hjulet viser billedresultater i et stort panel. Billedsider uden tekst får separate feltnumre, så de kan skelnes fra hinanden.
+
+## Sikker gemning og redigering
+
+Editoren validerer hele sættet før gemning og bevarer kladden, hvis lageret ikke kan skrive. Sletning og annullering kan ikke ramme en anden redigeringssession; billedoprydning beskytter det gemte sæt, sikkerhedskopien og aktive uploads. Skift til en færdig spiltilstand afbrydes, hvis den nødvendige sikkerhedskopi ikke kan gemmes.
+
+Spilpakke-designeren gemmer et fast snapshot, venter på coverbehandling og låser handlingerne under gemning. En tidligere cover-upload kan ikke ændre en senere designersession. Covervælgeren kan betjenes med tastatur, og fejl ved pakkeåbning vises uden at låse knappen.
+
+## Regressionstests
+
+Kør fra repository-roden med Node.js. Testene kræver ingen ekstra pakker:
+
+```sh
+node tests/state-regression.cjs
+node tests/pack-regression.cjs
+node tests/board-regression.cjs
+```
+
+De 38 kontroller kører de faktiske produktionsfunktioner med kontrollerede DOM- og lagergrænser. De dækker samtidig redigering, gemmefejl, fyldt lager, transaktionsfejl, backup/gendannelse, spilpakker, coverbehandling og billedresultater. Visuel browserkontrol supplerer disse tests.

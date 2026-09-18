@@ -7,19 +7,21 @@
   const emptyFace = (text = '') => ({text, imageId: ''});
   const defaults = () => ({version: 2, count: 4, dice: Array.from({length: 4}, (_, i) => ({name: `Terning ${i + 1}`, faces: ['1','2','3','4','5','6'].map(emptyFace)}))});
   const faceOK = f => f && typeof f.text === 'string' && f.text.length <= 160 && typeof f.imageId === 'string' && f.imageId.length <= 100 && (f.text.trim() || f.imageId);
-  const valid2 = data => data && data.version === 2 && Number.isInteger(data.count) && data.count >= 1 && data.count <= 4 && Array.isArray(data.dice) && data.dice.length === 4 && data.dice.every(d => typeof d.name === 'string' && d.name.trim() && d.name.length <= 30 && Array.isArray(d.faces) && d.faces.length >= 2 && d.faces.length <= 20 && d.faces.every(faceOK));
-  const valid1 = data => data && data.version === 1 && Number.isInteger(data.count) && data.count >= 1 && data.count <= 4 && Array.isArray(data.dice) && data.dice.length === 4 && data.dice.every(d => typeof d.name === 'string' && d.name.trim() && Array.isArray(d.faces) && d.faces.length >= 2 && d.faces.length <= 20 && d.faces.every(f => typeof f === 'string' && f.trim()));
+  const valid2 = data => data && data.version === 2 && Number.isInteger(data.count) && data.count >= 1 && data.count <= 4 && Array.isArray(data.dice) && data.dice.length === 4 && data.dice.every(d => d && typeof d.name === 'string' && d.name.trim() && d.name.length <= 30 && Array.isArray(d.faces) && d.faces.length >= 2 && d.faces.length <= 20 && d.faces.every(faceOK));
+  const valid1 = data => data && data.version === 1 && Number.isInteger(data.count) && data.count >= 1 && data.count <= 4 && Array.isArray(data.dice) && data.dice.length === 4 && data.dice.every(d => d && typeof d.name === 'string' && d.name.trim() && Array.isArray(d.faces) && d.faces.length >= 2 && d.faces.length <= 20 && d.faces.every(f => typeof f === 'string' && f.trim()));
   const migrate = data => ({version: 2, count: data.count, dice: data.dice.map(d => ({name: d.name, faces: d.faces.map(text => emptyFace(text))}))});
 
   let config = defaults();
   let storageOK = true;
+  let initializeStorage = false;
   try {
     const stored = localStorage.getItem(KEY);
     if (stored) {
       const parsed = JSON.parse(stored);
       if (valid2(parsed)) config = parsed;
-      else if (valid1(parsed)) config = migrate(parsed);
-    }
+      else if (valid1(parsed) && valid2(migrate(parsed))) { config = migrate(parsed); initializeStorage = true; }
+      else storageOK = false;
+    } else initializeStorage = true;
   } catch { storageOK = false; }
 
   const media = (() => {
@@ -37,9 +39,12 @@
     const action = async (mode, run) => {
       const db = await open();
       return new Promise((resolve, reject) => {
-        const tx = db.transaction(DB_STORE, mode); const store = tx.objectStore(DB_STORE); let request;
-        try { request = run(store); } catch (error) { reject(error); return; }
-        request.onsuccess = () => resolve(request.result);
+        const tx = db.transaction(DB_STORE, mode); const store = tx.objectStore(DB_STORE); let request, result;
+        tx.oncomplete = () => resolve(result);
+        tx.onabort = () => reject(tx.error || request?.error || new Error('Ændringen i billedlageret blev ikke gemt.'));
+        tx.onerror = () => reject(tx.error || request?.error || new Error('Billedlageret svarede ikke.'));
+        try { request = run(store); } catch (error) { try { tx.abort(); } catch {} reject(error); return; }
+        request.onsuccess = () => { result = request.result; };
         request.onerror = () => reject(request.error || new Error('Billedlageret svarede ikke.'));
       });
     };
@@ -61,10 +66,26 @@
   }
   function dropCachedURL(id) { if (imageURLs.has(id)) { URL.revokeObjectURL(imageURLs.get(id)); imageURLs.delete(id); } }
   async function deleteImage(id) { if (!id) return; try { await media.del(id); } catch {} dropCachedURL(id); }
+  function retainedImages() {
+    const used = new Set(sessionNewImages);
+    const retain = data => { for (const die of data?.dice || []) for (const face of die.faces || []) if (face.imageId) used.add(face.imageId); };
+    retain(config);
+    try {
+      const persisted = JSON.parse(localStorage.getItem(KEY) || 'null');
+      const backup = JSON.parse(localStorage.getItem('neon-terninger-custom-backup-v1') || 'null');
+      if ((persisted && !valid2(persisted)) || (backup && !valid2(backup))) return null;
+      retain(persisted); retain(backup);
+    } catch { return null; }
+    return used;
+  }
   async function cleanupUnusedImages() {
-    const used = new Set(config.dice.flatMap(d => d.faces.map(f => f.imageId).filter(Boolean)));
-    try { const backup=JSON.parse(localStorage.getItem('neon-terninger-custom-backup-v1')||'null'); for(const d of backup?.dice||[]) for(const f of d.faces||[]) if(f.imageId) used.add(f.imageId); } catch {}
-    try { for (const id of await media.keys()) if (!used.has(id)) await deleteImage(id); } catch {}
+    try {
+      for (const id of await media.keys()) {
+        const used = retainedImages();
+        if (!used) return;
+        if (!used.has(id)) await deleteImage(id);
+      }
+    } catch {}
   }
   async function prepareImage(file) {
     if (!file || !file.type.startsWith('image/')) throw new Error('Vælg en almindelig billedfil.');
@@ -86,14 +107,20 @@
   let selected = 0, next = 0, round = 1, busy = false, results = [null,null,null,null], resultIndices = [null,null,null,null];
   let imageBusy = false;
   let draft, editing = 0, sessionNewImages = new Set(), facePaint = 0;
+  let editorVersion = 0, editorActive = false;
   const announce = text => { $('announcement').textContent = text; };
   const element = (tag, className, content) => { const el = document.createElement(tag); if (className) el.className = className; if (content !== undefined) el.textContent = content; return el; };
   const faceLabel = face => face?.text?.trim() || (face?.imageId ? 'Billedside' : 'Tom side');
   const boardUI = window.NeonBoards.create({onChange:render, onSelect:selectDie, faceLabel, imageURL});
-  function save() { try { localStorage.setItem(KEY, JSON.stringify(config)); storageOK = true; } catch { storageOK = false; announce('Ændringerne virker nu, men browseren kunne ikke gemme dem.'); } updateStorage(); }
-  function updateStorage() { $('storage-label').textContent = storageOK ? 'Tekst + billeder gemt lokalt' : 'Kun gemt indtil siden lukkes'; }
+  function save(candidate = config) {
+    if (!valid2(candidate)) { announce('Sættet er ugyldigt. Hver terning skal have et navn og 2–20 udfyldte sider.'); return false; }
+    try { localStorage.setItem(KEY, JSON.stringify(candidate)); config = candidate; storageOK = true; }
+    catch { storageOK = false; announce('Browseren kunne ikke gemme ændringerne. Dine tidligere gemte terninger er bevaret.'); updateStorage(); return false; }
+    updateStorage(); return true;
+  }
+  function updateStorage() { $('storage-label').textContent = storageOK ? 'Tekst + billeder gemt lokalt' : 'Seneste ændringer er ikke gemt'; }
   function resetRound(increment = true) { if (busy) return; if (increment) round++; selected = 0; next = 0; results = [null,null,null,null]; resultIndices = [null,null,null,null]; render(); }
-  function setCount(count) { if (busy || !Number.isInteger(count) || count < 1 || count > 4) return; config.count = count; save(); resetRound(false); $('dice-count').children[count - 1].focus(); }
+  function setCount(count) { if (busy || !Number.isInteger(count) || count < 1 || count > 4) return; if (!save({...config, count})) return; resetRound(false); $('dice-count').children[count - 1].focus(); }
   function selectDie(index, source = 'list') { if (busy || index < 0 || index >= config.count) return; selected = index; next = index; render(); if (source === 'reel') document.querySelector(`[data-reel="${index}"]`)?.focus(); else $('dice-list').children[index].focus(); }
 
   async function addFaceImage(container, imageId, className, alt) {
@@ -154,28 +181,57 @@
     return {die:die.name,board:boardUI.mode,faceIndex:outcome,result:{text:results[index].text,hasImage:Boolean(results[index].imageId)}};
   }
 
-  function openEditor(){ if(busy)return; draft=JSON.parse(JSON.stringify(config.dice)); editing=selected; sessionNewImages=new Set(); $('editor-error').textContent=''; renderEditor(); $('editor').showModal(); }
+  const sameEditor = version => editorActive && version === editorVersion;
+  const canEdit = (version = editorVersion) => sameEditor(version) && !imageBusy;
+  function closeEditor() { editorActive = false; editorVersion++; draft = null; sessionNewImages.clear(); $('editor').close(); }
+  function openEditor(){ if(busy || editorActive || imageBusy)return; editorVersion++; editorActive=true; draft=JSON.parse(JSON.stringify(config.dice)); editing=selected; sessionNewImages=new Set(); $('editor-error').textContent=''; renderEditor(); $('editor').showModal(); }
   async function paintEditorPreview(preview, face) { preview.dataset.paint=face.imageId; if(!face.imageId){preview.append(element('span','preview-empty','Intet billede'));return;} const url=await imageURL(face.imageId); if(preview.dataset.paint!==face.imageId)return; if(!url){preview.append(element('span','preview-empty','Billede mangler'));return;} const img=element('img','editor-preview-image'); img.src=url; img.alt=face.text||'Forhåndsvisning'; preview.append(img); }
   function renderEditor(){
-    const tabs=$('editor-tabs'); tabs.replaceChildren(); draft.forEach((die,i)=>{const button=element('button','',`Terning ${i+1}`);button.type='button';button.setAttribute('aria-pressed',String(i===editing));button.addEventListener('click',()=>{editing=i;renderEditor();$('editor-tabs').children[i].focus();});tabs.append(button);}); $('die-name').value=draft[editing].name;
+    if (!editorActive || !draft) return;
+    const version=editorVersion, targetDie=draft[editing];
+    const tabs=$('editor-tabs'); tabs.replaceChildren(); draft.forEach((die,i)=>{const button=element('button','',`Terning ${i+1}`);button.type='button';button.setAttribute('aria-pressed',String(i===editing));button.addEventListener('click',()=>{if(!canEdit(version))return;editing=i;renderEditor();$('editor-tabs').children[i].focus();});tabs.append(button);}); $('die-name').value=targetDie.name;
     const container=$('face-inputs'); container.replaceChildren();
-    draft[editing].faces.forEach((face,i)=>{
-      const card=element('section','face-editor-card'); const top=element('div','face-editor-top'); top.append(element('span','face-index',`SIDE ${String(i+1).padStart(2,'0')}`)); const remove=element('button','remove-face','×'); remove.type='button'; remove.setAttribute('aria-label',`Fjern side ${i+1}`); remove.disabled=draft[editing].faces.length<=2; remove.addEventListener('click',async()=>{const id=draft[editing].faces[i].imageId;if(sessionNewImages.has(id)){sessionNewImages.delete(id);await deleteImage(id);}draft[editing].faces.splice(i,1);renderEditor();}); top.append(remove);
+    targetDie.faces.forEach((face,i)=>{
+      const card=element('section','face-editor-card'); const top=element('div','face-editor-top'); top.append(element('span','face-index',`SIDE ${String(i+1).padStart(2,'0')}`)); const remove=element('button','remove-face','×'); remove.type='button'; remove.setAttribute('aria-label',`Fjern side ${i+1}`); remove.disabled=targetDie.faces.length<=2; remove.addEventListener('click',()=>{if(!canEdit(version)||targetDie.faces.length<=2)return;const index=targetDie.faces.indexOf(face);if(index<0)return;targetDie.faces.splice(index,1);renderEditor();}); top.append(remove);
       const grid=element('div','face-editor-grid'); const preview=element('div','face-preview'); void paintEditorPreview(preview,face);
-      const fields=element('div','face-fields'); const textLabel=element('label','mini-label','Tekst'); textLabel.htmlFor=`face-${i}`; const input=element('input'); input.id=`face-${i}`; input.value=face.text; input.maxLength=160; input.placeholder='Fx Kys mig, Massage, 6…'; input.addEventListener('input',()=>{draft[editing].faces[i].text=input.value;});
+      const fields=element('div','face-fields'); const textLabel=element('label','mini-label','Tekst'); textLabel.htmlFor=`face-${i}`; const input=element('input'); input.id=`face-${i}`; input.value=face.text; input.maxLength=160; input.placeholder='Fx Kys mig, Massage, 6…'; input.addEventListener('input',()=>{if(canEdit(version)&&targetDie.faces.includes(face))face.text=input.value;});
       const actions=element('div','image-actions'); const uploadLabel=element('label','upload-button',face.imageId?'Skift billede':'Tilføj billede'); const file=element('input','file-input'); file.type='file'; file.accept='image/*'; file.setAttribute('aria-label',`Vælg billede til side ${i+1}`); uploadLabel.append(file);
-      file.addEventListener('change',async()=>{const chosen=file.files?.[0];if(!chosen||imageBusy)return; const targetFace=face; imageBusy=true; $('editor-form').querySelectorAll('button,input').forEach(control=>control.disabled=true); $('editor-error').textContent='Optimerer billedet…'; try{const blob=await prepareImage(chosen);const id=crypto.randomUUID?crypto.randomUUID():`${Date.now()}-${Math.random().toString(36).slice(2)}`;await media.put(id,blob);sessionNewImages.add(id);const old=targetFace.imageId;if(sessionNewImages.has(old)&&old!==id){sessionNewImages.delete(old);await deleteImage(old);}targetFace.imageId=id;$('editor-error').textContent='';renderEditor();}catch(error){$('editor-error').textContent=error.message||'Billedet kunne ikke tilføjes.';}finally{imageBusy=false;$('editor-form').querySelectorAll('button,input').forEach(control=>control.disabled=false);renderEditor();}});
-      actions.append(uploadLabel); if(face.imageId){const clear=element('button','clear-image','Fjern billede');clear.type='button';clear.addEventListener('click',async()=>{const id=draft[editing].faces[i].imageId;if(sessionNewImages.has(id)){sessionNewImages.delete(id);await deleteImage(id);}draft[editing].faces[i].imageId='';renderEditor();});actions.append(clear);}
+      file.addEventListener('change',async()=>{
+        const chosen=file.files?.[0];if(!chosen||!canEdit(version)||!targetDie.faces.includes(face))return;
+        imageBusy=true;$('editor-form').querySelectorAll('button,input').forEach(control=>control.disabled=true);$('editor-error').textContent='Optimerer billedet…';
+        let id='';
+        try {
+          const blob=await prepareImage(chosen);
+          if(!sameEditor(version))return;
+          id=crypto.randomUUID?crypto.randomUUID():`${Date.now()}-${Math.random().toString(36).slice(2)}`;
+          sessionNewImages.add(id);
+          await media.put(id,blob);
+          if(!sameEditor(version))return;
+          face.imageId=id;$('editor-error').textContent='';
+        } catch(error) { if(id)sessionNewImages.delete(id);if(sameEditor(version))$('editor-error').textContent=error.message||'Billedet kunne ikke tilføjes.'; }
+        finally { if(sameEditor(version)){imageBusy=false;$('editor-form').querySelectorAll('button,input').forEach(control=>control.disabled=false);renderEditor();} }
+      });
+      actions.append(uploadLabel); if(face.imageId){const clear=element('button','clear-image','Fjern billede');clear.type='button';clear.addEventListener('click',()=>{if(!canEdit(version)||!targetDie.faces.includes(face))return;face.imageId='';renderEditor();});actions.append(clear);}
       fields.append(textLabel,input,actions); grid.append(preview,fields); card.append(top,grid); container.append(card);
     }); $('face-count').textContent=`(${draft[editing].faces.length})`; $('add-face').disabled=draft[editing].faces.length>=20;
   }
-  $('die-name').addEventListener('input',()=>{draft[editing].name=$('die-name').value;});
-  $('add-face').addEventListener('click',()=>{if(draft[editing].faces.length>=20)return;draft[editing].faces.push(emptyFace(''));renderEditor();$('face-inputs').lastElementChild.querySelector('input:not([type=file])').focus();});
-  async function cancelEditor(){if(imageBusy){$('editor-error').textContent='Vent, mens billedet gemmes…';return;}for(const id of sessionNewImages)await deleteImage(id);sessionNewImages.clear();$('editor').close();}
-  $('editor-form').addEventListener('submit',async event=>{event.preventDefault(); if(imageBusy){$('editor-error').textContent='Vent, mens billedet gemmes…';return;} const normalized=draft.map(d=>({name:d.name.trim(),faces:d.faces.map(f=>({text:f.text.trim(),imageId:f.imageId||''}))})); const bad=normalized.findIndex(d=>!d.name||d.faces.some(f=>!f.text&&!f.imageId)); if(bad!==-1){editing=bad;renderEditor();$('editor-error').textContent=`Udfyld tekst eller tilføj et billede på alle sider af terning ${bad+1}.`;return;} config={...config,version:2,dice:normalized};sessionNewImages.clear();save();$('editor').close();resetRound(false);void cleanupUnusedImages();announce(storageOK?'Dine terninger er gemt. Klar til en ny runde.':'Terningerne er ændret, men teksten kunne ikke gemmes på enheden.');});
+  $('die-name').addEventListener('input',()=>{if(canEdit())draft[editing].name=$('die-name').value;});
+  $('add-face').addEventListener('click',()=>{if(!canEdit()||draft[editing].faces.length>=20)return;draft[editing].faces.push(emptyFace(''));renderEditor();$('face-inputs').lastElementChild.querySelector('input:not([type=file])').focus();});
+  function cancelEditor(){if(!editorActive)return;if(imageBusy){$('editor-error').textContent='Vent, mens billedet gemmes…';return;}closeEditor();void cleanupUnusedImages();}
+  $('editor-form').addEventListener('submit',event=>{
+    event.preventDefault();if(!editorActive)return;if(imageBusy){$('editor-error').textContent='Vent, mens billedet gemmes…';return;}
+    const normalized=draft.map(d=>({name:d.name.trim(),faces:d.faces.map(f=>({text:f.text.trim(),imageId:f.imageId||''}))}));
+    const candidate={...config,version:2,dice:normalized};
+    if(!valid2(candidate)) {
+      const bad=normalized.findIndex(d=>!d.name||d.name.length>30||d.faces.length<2||d.faces.length>20||!d.faces.every(faceOK));
+      if(bad>=0)editing=bad;renderEditor();$('editor-error').textContent='Hver terning skal have et navn på højst 30 tegn og 2–20 sider med tekst på højst 160 tegn eller et billede.';return;
+    }
+    if(!save(candidate)){$('editor-error').textContent='Ændringerne kunne ikke gemmes. Dine tidligere terninger og billeder er bevaret. Prøv igen, eller vælg Annuller.';return;}
+    closeEditor();resetRound(false);void cleanupUnusedImages();announce('Dine terninger er gemt. Klar til en ny runde.');
+  });
   $('close-editor').addEventListener('click',()=>void cancelEditor()); $('cancel-editor').addEventListener('click',()=>void cancelEditor()); $('editor').addEventListener('cancel',event=>{event.preventDefault();void cancelEditor();});
   $('edit-button').addEventListener('click',openEditor); $('roll-button').addEventListener('click',()=>{if(!busy)void roll().catch(error=>announce(error.message||'Slaget kunne ikke gennemføres. Prøv igen.'));}); $('new-round').addEventListener('click',()=>{resetRound();announce('Ny runde. Dine terninger er klar.');}); $('help-button').addEventListener('click',()=>$('help').showModal()); $('close-help').addEventListener('click',()=>$('help').close());
-  if (config.version === 2) save(); render(); void cleanupUnusedImages();
+  if (initializeStorage) save(); render(); void cleanupUnusedImages();
   if('serviceWorker'in navigator&&location.protocol!=='file:')navigator.serviceWorker.register('./sw.js').catch(()=>{});
   if(document.modelContext?.registerTool){const lifecycle=new AbortController();const register=tool=>{try{Promise.resolve(document.modelContext.registerTool(tool,{signal:lifecycle.signal})).catch(()=>{});}catch{}};register({name:'read_dice_game',description:'Read active dice, text/image face metadata and current round results.',inputSchema:{type:'object',properties:{},additionalProperties:false},annotations:{readOnlyHint:true,untrustedContentHint:true},execute:()=>({board:boardUI.mode,faceIndices:resultIndices.slice(0,config.count),count:config.count,dice:config.dice.slice(0,config.count).map(d=>({name:d.name,faces:d.faces.map(f=>({text:f.text,hasImage:Boolean(f.imageId)}))})),results:results.slice(0,config.count).map(r=>r?{text:r.text,hasImage:Boolean(r.imageId)}:null),round,busy})});register({name:'roll_one_die',description:'Roll one active die (1–4). Waits for the result.',inputSchema:{type:'object',properties:{die:{type:'integer',minimum:1,maximum:4}},required:['die'],additionalProperties:false},annotations:{readOnlyHint:false,untrustedContentHint:true},execute:async input=>{if(!input||!Number.isInteger(input.die))throw new Error('die must be an integer');if($('editor').open||$('help').open)throw new Error('Close the open dialog first.');return roll(input.die-1);}});register({name:'select_game_board',description:'Choose dice, slot or wheel. Preserves sides and round results. Fails while spinning or when a dialog is open.',inputSchema:{type:'object',properties:{board:{type:'string',enum:['dice','slot','wheel']}},required:['board'],additionalProperties:false},annotations:{readOnlyHint:false,untrustedContentHint:false},execute:input=>{boardUI.setMode(input?.board);return {board:boardUI.mode};}});window.addEventListener('pagehide',()=>lifecycle.abort(),{once:true});}
 })();
