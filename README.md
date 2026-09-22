@@ -8,7 +8,9 @@ Vælg **Party** eller **Erotisk**, 1–12 spillere og navne. Spilpakker vises ef
 
 ## Spillet
 
-Vælg **Terning**, **Lucky Spin** eller **Roulette**. Op til seks terninger/hjul, ét ad gangen, med 2–50 felter. Resultatboksene samler hele runden. **Ny runde** sender turen videre til næste spiller.
+Spil med **Terning**, **Lucky Spin** eller **Roulette** som valgt i Designer. Op til seks terninger/hjul, ét ad gangen, med 2–50 felter. Spillevisningen har ingen redigeringspaneler. I liggende tabletformat står resultaterne til højre; på smalle skærme står de under spillepladen. Tryk på en resultatboks for at vælge en terning eller genåbne indholdet.
+
+**Ny runde** gemmer et snapshot i **Tidligere runder** og sender turen videre til næste spiller. Tomme runder kan ikke sendes videre. Historikken beholder de sidste 20 runder inklusive billeder i den aktuelle session og nulstilles ved genindlæsning. **Fuldskærm** skjuler menuerne og giver spillepladen mere plads; browsere uden Fullscreen API får en fokusvisning. En ny spilpakke starter altid på runde 1.
 
 Hvert hjul/terning kan vise indhold, numre eller et valgfrit symbol. Nummer- og symbolvisning skjuler teksten og billedet under rulningen. Når feltet lander, åbnes en animeret popup med det faktiske indhold. Tilfældige resultater bruger `crypto.getRandomValues` med rejection sampling; alle felter har samme chance.
 
@@ -51,6 +53,7 @@ GitHub → Settings → Pages → Deploy from a branch → `main` → `/docs`.
 - `boards.js`, `boards.css`: terninger, slot og roulette med animationer.
 - `studio-model.js`: datamodel, validering og startpakker.
 - `studio.js`, `studio.css`: de fem sider, spillerne, designer, bibliotek, billedredigering og temaer.
+- `play.js`, `play.css`: tablet-layout, fuldskærm og rundehistorik.
 - `sw.js`: offline-cache. Opdater cacheversionen ved udgivelser.
 - `modes.js` og `packs.js`: tidligere moduler beholdt som kompatibilitetsreference; de indlæses ikke i den nye brugerflade.
 
@@ -63,8 +66,9 @@ node tests/state-regression.cjs
 node tests/pack-regression.cjs
 node tests/board-regression.cjs
 node tests/studio-regression.cjs
+node tests/play-regression.cjs
 ```
 
-58 kontroller dækker validering, migration, billedimport og oprydning, gemmefejl, transaktionsfejl, editorer, effektvalg, navigation, pakkeåbning samt roulette-markørens position for alle felter på hjul med 2–50 felter. Pakke-testene omfatter også den tidligere implementation for at bevare dens regressionshistorik.
+64 kontroller dækker validering, migration, billedimport og oprydning, gemmefejl, transaktionsfejl, editorer, effektvalg, navigation, pakkeåbning, rundeskift, genåbning af resultater, fuldskærm samt roulette-markørens position for alle felter på hjul med 2–50 felter. Pakke-testene omfatter også den tidligere implementation for at bevare dens regressionshistorik.
 
 Browserkontrol: gem/genåbn pakker med seks hjul og 50 felter, skjulte felter og animeret popup, billedresultater, upload, beskæring, genbrug i designer, temaer/udseende efter genindlæsning samt mobil-/tablet-layout. Der er ikke udført en fysisk enhedstest på iPad/Android eller en udtømmende test af alle browseres lagerkvoter og offlineadfærd.

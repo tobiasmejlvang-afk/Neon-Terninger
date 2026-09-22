@@ -39,14 +39,16 @@ function setupApp({config=makeConfig(),raw,db,overrideMedia=true,start=true}={})
   const form=document.getElementById('editor-form');
   for(const id of ['editor-tabs','face-inputs','die-name','add-face','cancel-editor','close-editor'])form.append(document.getElementById(id));
   class FakeImage {constructor(){this.naturalWidth=100;this.naturalHeight=100;}set src(value){queueMicrotask(()=>this.onload?.());}}
-  const window={NeonBoards:{create:()=>({render(){},mode:'dice'})}};if(db)window.indexedDB=db;
+  const events=[];
+  const window={dispatchEvent(event){events.push(event);},NeonBoards:{create:()=>({render(){},async spin(){},reveal(){},mode:'dice'})}};if(db)window.indexedDB=db;
   const context={document,localStorage:storage.api,window,indexedDB:db,navigator:{},location:{protocol:'file:'},Image:FakeImage,URL:{createObjectURL:()=> 'blob:fake',revokeObjectURL(){}},setTimeout,clearTimeout,crypto:require('node:crypto').webcrypto};context.globalThis=context;
   let code=fs.readFileSync(path.join(ROOT,'app.js'),'utf8');
   if(!start)code=code.replace('if (initializeStorage) save(); render(); void cleanupUnusedImages();','');
   code=code.replace(/\}\)\(\);\s*$/,`globalThis.audit={media,save,valid2,openEditor,cancelEditor,cleanupUnusedImages,state(){return {config,draft,editing,imageBusy,editorActive,sessionNewImages:[...sessionNewImages]};},stageImage(id,index=0){draft[editing].faces[index].imageId=id;sessionNewImages.add(id);renderEditor();}};})();`);
+  context.CustomEvent=class{constructor(type,options){this.type=type;this.detail=options.detail;}};
   vm.runInNewContext(code,context);
   if(overrideMedia){context.audit.media.get=async id=>blobStore.get(id);context.audit.media.keys=async()=>[...blobStore.keys()];context.audit.media.del=async id=>blobStore.delete(id);context.audit.media.put=async(id,blob)=>{blobStore.set(id,blob);return id;};}
-  return {a:context.audit,game:window.NeonGame,nodes,storage,blobStore};
+  return {a:context.audit,game:window.NeonGame,nodes,storage,blobStore,events};
 }
 function setupModes(config=makeConfig()) {
   const storage=makeStorage([[CONFIG,JSON.stringify(config)]]),alerts=[];let reloads=0;
@@ -62,6 +64,11 @@ const clearButton=(t,index=0)=>t.nodes.get('face-inputs').children[index].childr
 const submit=t=>t.nodes.get('editor-form').fire('submit');
 const dialog={close(){}};
 const tests=[];const test=(name,run)=>tests.push({name,run});
+
+test('An empty round cannot advance or produce a history entry',()=>{const t=setupApp();t.game.reset();assert.equal(t.game.snapshot().round,1);assert.equal(t.events.length,0);assert.equal(t.nodes.get('new-round').disabled,true);});
+test('Round snapshots preserve results, advance once and cannot mutate live config',async()=>{const t=setupApp();await t.game.roll(0);const outcome=t.game.snapshot().results[0].text;t.game.reset();const entry=t.events.find(e=>e.type==='neon:round-end');assert.equal(entry.detail.results[0].text,outcome);assert.equal(entry.detail.round,1);assert.equal(t.game.snapshot().round,2);assert.equal(t.game.snapshot().results.every(r=>r===null),true);entry.detail.config.dice[0].name='changed';assert.notEqual(t.game.config.dice[0].name,'changed');t.game.reset();assert.equal(t.events.filter(e=>e.type==='neon:round-end').length,1);});
+test('Result cards select an unplayed die and reopen completed content',async()=>{const t=setupApp();await t.nodes.get('results-list').children[1].fire('click');assert.equal(t.game.snapshot().next,1);await t.game.roll();await t.nodes.get('results-list').children[1].fire('click');assert.equal(t.events.at(-1).type,'neon:review');assert.equal(t.events.at(-1).detail.index,1);});
+test('Starting a new package resets the round number and all results',async()=>{const t=setupApp();await t.game.roll(0);t.game.reset();assert.equal(t.game.snapshot().round,2);t.game.apply(makeConfig());assert.equal(t.game.snapshot().round,1);assert.equal(t.game.snapshot().results.every(r=>r===null),true);});
 
 test('double removal cannot drop below two sides or save an invalid set',async()=>{
   const t=setupApp();t.a.openEditor();t.blobStore.set('newimg',true);t.a.stageImage('newimg');
