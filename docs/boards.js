@@ -7,7 +7,7 @@
   const mod = angle => ((angle % 360) + 360) % 360;
   // Sectors are centred on 0°, 360/n°, …, measured clockwise from the top.
   function targetRotation(count, index, current = 0) {
-    if (!Number.isInteger(count) || count < 2 || count > 20 || !Number.isInteger(index) || index < 0 || index >= count) throw new Error('Ugyldigt hjulfelt.');
+    if (!Number.isInteger(count) || count < 2 || count > 50 || !Number.isInteger(index) || index < 0 || index >= count) throw new Error('Ugyldigt hjulfelt.');
     return current + 5 * 360 + mod(-index * 360 / count - mod(current));
   }
   const el = (tag, cls, text) => { const node = document.createElement(tag); if (cls) node.className = cls; if (text !== undefined) node.textContent = text; return node; };
@@ -70,7 +70,12 @@
       }, {once: true});
       image.src = url; container.append(image);
     }
-    function cell(face) {
+    function shownFace(face, i, die) {
+      const reveal = die?.reveal || state?.config.reveal || 'content';
+      return reveal === 'content' ? face : {text: reveal === 'symbol' ? (die?.symbol || '✦') : String(i + 1), imageId:''};
+    }
+    function cell(face, i = 0, die) {
+      if (face) face = shownFace(face, i, die);
       const node = el('div', 'reel-cell');
       const label = face ? faceLabel(face) : '✦';
       node.append(el('span', '', label)); node.title = label;
@@ -79,7 +84,7 @@
     }
     function makeSlots() {
       const machine = el('div', 'slot-machine');
-      const marquee = el('div', 'slot-marquee'); marquee.append(el('small', '', 'ONE REEL AT A TIME'), el('strong', '', 'LUCKY SLOT'));
+      const marquee = el('div', 'slot-marquee'); marquee.append(el('small', '', 'ONE REEL AT A TIME'), el('strong', '', 'LUCKY SPIN'));
       const housing = el('div', 'slot-housing'), reels = el('div', 'reels'); reels.style.setProperty('--reels', state.config.count);
       state.config.dice.slice(0, state.config.count).forEach((die, i) => {
         const button = el('button', 'slot-reel'); button.type = 'button'; button.disabled = state.busy;
@@ -88,7 +93,9 @@
         button.append(el('span', 'reel-caption', `HJUL 0${i + 1}`));
         const viewport = el('div', 'reel-viewport'), strip = el('div', 'reel-strip');
         const index = state.resultIndices[i];
-        strip.append(cell(index === null ? die.faces[die.faces.length - 1] : die.faces[(index - 1 + die.faces.length) % die.faces.length]), cell(state.results[i]), cell(index === null ? die.faces[0] : die.faces[(index + 1) % die.faces.length]));
+        const previous = index === null ? die.faces.length - 1 : (index - 1 + die.faces.length) % die.faces.length;
+        const following = index === null ? 0 : (index + 1) % die.faces.length;
+        strip.append(cell(die.faces[previous], previous, die), cell(state.results[i], index ?? 0, die), cell(die.faces[following], following, die));
         viewport.append(strip, el('span', 'reel-payline')); button.append(viewport, el('span', 'reel-label', die.name)); reels.append(button);
       });
       housing.append(reels); for (let i = 0; i < 4; i++) housing.append(el('span', `machine-bolt bolt-${i}`));
@@ -98,12 +105,13 @@
       const stage = el('div', 'wheel-stage'), rim = el('div', 'wheel-rim');
       const die = state.config.dice[state.selected], count = die.faces.length, step = 360 / count;
       const disc = svg('svg', {viewBox:'0 0 400 400', class:'wheel-disc', 'aria-label':`Spin-hjul med ${count} felter`, role:'img'});
-      die.faces.forEach((face, i) => {
+      die.faces.forEach((original, i) => {
+        const face = shownFace(original, i, die);
         const start = i * step - step / 2, end = start + step, a = polar(190, start), b = polar(190, end);
         const group = svg('g', {}), path = svg('path', {d:`M 200 200 L ${a.x} ${a.y} A 190 190 0 ${step > 180 ? 1 : 0} 1 ${b.x} ${b.y} Z`, class:'wheel-sector', fill:i % 2 === 0 ? '#8c0925' : '#210b12', stroke:'#ff47564d', 'stroke-width':'1'});
         const position = polar(count > 12 ? 151 : 139, i * step);
-        const text = svg('text', {x:position.x, y:position.y, 'text-anchor':'middle', 'dominant-baseline':'middle', transform:`rotate(${i * step}, ${position.x}, ${position.y})`, class:'wheel-label', 'font-size':count > 12 ? '11' : '13'});
-        const label = face.imageId && !face.text.trim() ? `Billede ${i + 1}` : faceLabel(face), maxLetters = count > 12 ? 6 : count > 8 ? 8 : 12;
+        const text = svg('text', {x:position.x, y:position.y, 'text-anchor':'middle', 'dominant-baseline':'middle', transform:`rotate(${i * step}, ${position.x}, ${position.y})`, class:'wheel-label', 'font-size':count > 30 ? '7' : count > 20 ? '9' : count > 12 ? '11' : '13'});
+        const label = face.imageId && !face.text.trim() ? `Billede ${i + 1}` : faceLabel(face), maxLetters = count > 20 ? 3 : count > 12 ? 6 : count > 8 ? 8 : 12;
         text.textContent = face.imageId && !face.text.trim() && count > 8 ? `#${i + 1}` : [...label].length > maxLetters ? [...label].slice(0,maxLetters - 1).join('') + '…' : label;
         const title = svg('title', {}); title.textContent = `${i + 1}. ${label}`;
         group.append(title, path, text); disc.append(group);
@@ -136,11 +144,12 @@
       effectState();
     }
     async function spin(index, outcome, faceView) {
-      const die = state.config.dice[index], duration = reduce() ? 100 : mode === 'dice' ? 1150 : mode === 'slot' ? 2300 : 2900;
+      const die = state.config.dice[index], speed = Number(document.body.dataset.speed) || 1;
+      const duration = reduce() ? 100 : (mode === 'dice' ? 1150 : mode === 'slot' ? 2300 : 2900) * speed;
       if (mode === 'dice') {
         const block = $('die-block'); block.classList.add('is-rolling');
         let frame = 0;
-        const ticker = reduce() ? null : setInterval(() => faceView(die.faces[frame++ % die.faces.length]), 110);
+        const ticker = reduce() ? null : setInterval(() => faceView(shownFace(die.faces[frame % die.faces.length], frame++ % die.faces.length, die)), 110);
         try { await delay(duration); } finally { if (ticker) clearInterval(ticker); block.classList.remove('is-rolling'); }
       } else if (mode === 'slot') {
         const reel = document.querySelector(`[data-reel="${index}"]`), strip = reel.querySelector('.reel-strip');
@@ -148,7 +157,7 @@
         if (!reduce()) {
           const landing = Math.max(3, Math.ceil(28 / die.faces.length)) * die.faces.length + outcome;
           strip.replaceChildren();
-          for (let i=0; i <= landing + 1; i++) strip.append(cell(die.faces[i % die.faces.length]));
+          for (let i=0; i <= landing + 1; i++) strip.append(cell(die.faces[i % die.faces.length], i % die.faces.length, die));
           await animate(strip, [{transform:'translateY(0px)'}, {transform:`translateY(-${(landing - 1) * 80}px)`}], duration);
         } else await delay(duration);
         reel.classList.remove('is-spinning');
@@ -167,7 +176,7 @@
       requestAnimationFrame(() => area.classList.add('has-reveal'));
       revealTimer = setTimeout(() => { area.classList.remove('has-reveal'); particles.replaceChildren(); },1300);
     }
-    return {get mode(){return mode;}, setMode, render, spin, reveal};
+    return {get mode(){return mode;}, get effects(){return effects;}, setEffects(value){if(state?.busy)return;if(!['auto','full','quiet'].includes(value))throw new Error('Ugyldigt effektvalg.');effects=value;save(EFFECTS_KEY,value);effectState();}, setMode, render, spin, reveal};
   }
   window.NeonBoards = {create, targetRotation};
 })();

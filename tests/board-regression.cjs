@@ -331,14 +331,14 @@ test('Text-only outcomes keep the media panel empty and hidden', async () => {
   assert.equal(h.get('result-value').textContent, 'Tekst uden billede');
 });
 
-test('HTML and manifest assets exist and are included in the v9 offline cache', () => {
+test('HTML and manifest assets exist and are included in the v10 offline cache', () => {
   const html = fs.readFileSync(path.join(DOCS, 'index.html'), 'utf8');
   const manifest = JSON.parse(fs.readFileSync(path.join(DOCS, 'manifest.webmanifest'), 'utf8'));
   const sw = fs.readFileSync(path.join(DOCS, 'sw.js'), 'utf8');
   const swContext = vm.createContext({self: {addEventListener() {}}});
   vm.runInContext(sw + '\n;globalThis.audit = {CACHE, ASSETS};', swContext);
   const {CACHE, ASSETS} = swContext.audit;
-  assert.match(CACHE, /^neon-terninger-v9(?:-|$)/);
+  assert.match(CACHE, /^neon-terninger-v10(?:-|$)/);
   const urls = [...html.matchAll(/<(?:link|script)\b[^>]*(?:href|src)="(\.\/[^"?#]+)"/g)].map(match => match[1]);
   urls.push(...manifest.icons.map(icon => icon.src));
   for (const url of new Set([...urls, ...ASSETS])) {

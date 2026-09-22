@@ -46,7 +46,7 @@ function setupApp({config=makeConfig(),raw,db,overrideMedia=true,start=true}={})
   code=code.replace(/\}\)\(\);\s*$/,`globalThis.audit={media,save,valid2,openEditor,cancelEditor,cleanupUnusedImages,state(){return {config,draft,editing,imageBusy,editorActive,sessionNewImages:[...sessionNewImages]};},stageImage(id,index=0){draft[editing].faces[index].imageId=id;sessionNewImages.add(id);renderEditor();}};})();`);
   vm.runInNewContext(code,context);
   if(overrideMedia){context.audit.media.get=async id=>blobStore.get(id);context.audit.media.keys=async()=>[...blobStore.keys()];context.audit.media.del=async id=>blobStore.delete(id);context.audit.media.put=async(id,blob)=>{blobStore.set(id,blob);return id;};}
-  return {a:context.audit,nodes,storage,blobStore};
+  return {a:context.audit,game:window.NeonGame,nodes,storage,blobStore};
 }
 function setupModes(config=makeConfig()) {
   const storage=makeStorage([[CONFIG,JSON.stringify(config)]]),alerts=[];let reloads=0;
@@ -95,7 +95,7 @@ test('cancel after failed save keeps previously saved images and discards only n
   assert.equal(t.blobStore.has('oldimg'),true);assert.equal(t.blobStore.has('newimg'),false);assert.equal(JSON.parse(t.storage.values.get(CONFIG)).dice[0].faces[0].imageId,'oldimg');
 });
 test('full validation rejects invalid save candidates and invalid editor submissions',async()=>{
-  const mutations=[c=>c.count=5,c=>c.dice.pop(),c=>c.dice[0]=null,c=>c.dice[0].faces.pop()&&c.dice[0].faces.pop(),c=>c.dice[0].faces=Array(21).fill({text:'ok',imageId:''}),c=>c.dice[0].name='',c=>c.dice[0].name='x'.repeat(31),c=>c.dice[0].faces[0]={text:'',imageId:''},c=>c.dice[0].faces[0].text='x'.repeat(161)];
+  const mutations=[c=>c.count=5,c=>c.dice.pop(),c=>c.dice[0]=null,c=>c.dice[0].faces.pop()&&c.dice[0].faces.pop(),c=>c.dice[0].faces=Array(51).fill({text:'ok',imageId:''}),c=>c.dice[0].name='',c=>c.dice[0].name='x'.repeat(31),c=>c.dice[0].faces[0]={text:'',imageId:''},c=>c.dice[0].faces[0].text='x'.repeat(161)];
   const t=setupApp(),before=t.storage.values.get(CONFIG);for(const mutate of mutations){const candidate=makeConfig();mutate(candidate);assert.equal(t.a.save(candidate),false);assert.equal(t.storage.values.get(CONFIG),before);}
   t.a.openEditor();t.a.state().draft[0].faces.splice(1);await submit(t);assert.equal(t.a.state().editorActive,true);assert.equal(t.storage.values.get(CONFIG),before);
 });
@@ -122,6 +122,11 @@ test('IndexedDB write resolves only on transaction completion and rejects commit
   const indexedDB={open(){const request={result:database};queueMicrotask(()=>request.onsuccess());return request;}};
   const t=setupApp({db:indexedDB,overrideMedia:false,start:false});let resolved=false;const first=t.a.media.put('image',{}).then(()=>{resolved=true;});await tick();const tx=transactions[0];tx.request.onsuccess();await tick();assert.equal(resolved,false);tx.oncomplete();await first;assert.equal(resolved,true);
   const second=t.a.media.put('image2',{});const rejection=assert.rejects(second,/commit aborted/);await tick();const aborted=transactions[1];aborted.request.onsuccess();aborted.error=new Error('commit aborted');aborted.onabort();await rejection;
+});
+test('pack image imports survive cleanup until commit and failed imports can be released',async()=>{
+  const t=setupApp();await t.game.media.put('staged-pack-image',true);await t.a.cleanupUnusedImages();assert.equal(t.blobStore.has('staged-pack-image'),true);
+  const candidate=makeConfig();candidate.dice[0].faces[0].imageId='staged-pack-image';t.a.save(candidate);t.game.releaseImages(['staged-pack-image']);await tick();assert.equal(t.blobStore.has('staged-pack-image'),true);
+  await t.game.media.put('abandoned-pack-image',true);t.game.releaseImages(['abandoned-pack-image']);await tick();assert.equal(t.blobStore.has('abandoned-pack-image'),false);assert.equal(t.blobStore.has('staged-pack-image'),true);
 });
 test('preset application aborts if there is no space for the required backup',()=>{
   const cfg=makeConfig();for(const die of cfg.dice)die.faces=Array.from({length:20},()=>({text:'Custom user content '.repeat(8),imageId:''}));const t=setupModes(cfg),before=t.storage.values.get(CONFIG);t.storage.setQuota(t.storage.size()+128);t.a.applyMode('romantic',dialog);
