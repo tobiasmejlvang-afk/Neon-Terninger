@@ -21,7 +21,7 @@
     });return true;
   }
   function resizeFaces(d,count){if(!Number.isInteger(count)||count<2||count>50)throw new Error('Vælg 2–50 felter.');while(d.faces.length<count)d.faces.push(face(`Felt ${d.faces.length+1}`));d.faces.length=count;}
-  const themes=[{id:'crimson',name:'Crimson Room',accent:'#ff354d',secondary:'#ff986f',background:'#0e080d'},{id:'violet',name:'Electric Violet',accent:'#bd75ff',secondary:'#66e4ff',background:'#0d0b19'},{id:'ice',name:'Arctic Neon',accent:'#39e4dc',secondary:'#72a3ff',background:'#071218'},{id:'gold',name:'Midnight Gold',accent:'#f4bc61',secondary:'#ff647d',background:'#15100a'}];
+  const themes=[{id:'velvet',name:'Dark Velvet Neon',accent:'#ff2f83',secondary:'#ba8cff',background:'#0b0609'},{id:'crimson',name:'Crimson Room',accent:'#ff354d',secondary:'#ff986f',background:'#0e080d'},{id:'violet',name:'Electric Violet',accent:'#bd75ff',secondary:'#66e4ff',background:'#0d0b19'},{id:'ice',name:'Arctic Neon',accent:'#39e4dc',secondary:'#72a3ff',background:'#071218'},{id:'gold',name:'Midnight Gold',accent:'#f4bc61',secondary:'#ff647d',background:'#15100a'}];
   const presets=[
     {id:'starter-party',name:'Icebreaker',type:'party',category:'Selskab',genre:'Samtale & grin',intensity:'Let',board:'dice',themeId:'violet',icon:'⚡',description:'Lær hinanden at kende. Ét kast, én ny historie.',dice:[die('Bryd isen',['Fortæl om din sjoveste ferie','Vis dit skjulte talent','Hvem her ville vinde et talentshow?','Fortæl to sandheder og én løgn','Vælg aftenens temasang','Lav din bedste imitation']),die('Twist',['På 20 sekunder','Med en dramatisk stemme','Som en nyhedsoplæser','Med en medspiller','Uden at bruge hænderne','De andre må stille ét spørgsmål'])]},
     {id:'starter-spin',name:'Neon Challenge',type:'party',category:'Udfordringer',genre:'Performance',intensity:'Høj',board:'slot',themeId:'ice',icon:'★',description:'Små scener, store grin. Lad Lucky Spin vælge.',dice:[die('Udfordring',['Dans i 20 sekunder','Lav en reklame for din sko','Syng en sætning','Opfind et nyt håndtryk','Lav en sejrsdans','Fortæl en vittighed']),die('Stil',['Som en robot','Som en rockstjerne','I slowmotion','Som en detektiv','Som en superhelt','Helt alvorligt']),die('Hold',['Vælg en makker','Alle sammen','Dig alene','Spilleren til venstre','Spilleren til højre','De andre vælger'])]},
@@ -30,3 +30,4 @@
   ].map(p=>{const config=blank();p.dice.forEach((d,i)=>config.dice[i]=d);config.count=p.dice.length;return {...p,config,images:[],builtin:true};});
   window.NeonStudioModel={blank,die,face,normalize,validate,resizeFaces,themes,presets,clone};
 })();
+
