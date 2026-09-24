@@ -1,6 +1,6 @@
 'use strict';
-const CACHE = 'neon-terninger-v11-tablet-play';
-const ASSETS = ['./', './index.html', './style.css', './modes.css', './packs.css', './boards.css', './boards.js', './studio-model.js', './studio.js', './studio.css', './play.css', './play.js', './app.js', './modes.js', './packs.js', './icon.svg', './icon-192.png', './icon-512.png', './manifest.webmanifest'];
+const CACHE = 'neon-terninger-v12-ultimate-fusion';
+const ASSETS = ['./', './index.html', './style.css', './modes.css', './packs.css', './boards.css', './boards.js', './studio-model.js', './studio.js', './studio.css', './play.css', './play.js', './app.js', './fusion.js', './fusion-model.js', './fusion.css', './modes.js', './packs.js', './icon.svg', './icon-192.png', './icon-512.png', './manifest.webmanifest'];
 self.addEventListener('install', event => event.waitUntil(caches.open(CACHE).then(cache => cache.addAll(ASSETS)).then(() => self.skipWaiting())));
 self.addEventListener('activate', event => event.waitUntil(caches.keys().then(keys => Promise.all(keys.filter(key => key.startsWith('neon-terninger-') && key !== CACHE).map(key => caches.delete(key)))).then(() => self.clients.claim())));
 self.addEventListener('fetch', event => {
@@ -16,3 +16,4 @@ self.addEventListener('fetch', event => {
     return Response.error();
   }));
 });
+

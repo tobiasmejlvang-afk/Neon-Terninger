@@ -106,6 +106,7 @@
   }
 
   let selected = 0, next = 0, round = 1, busy = false, results = Array(6).fill(null), resultIndices = Array(6).fill(null);
+  let locks = Array(6).fill(false), paused = false;
   let imageBusy = false;
   let draft, editing = 0, sessionNewImages = new Set(), facePaint = 0;
   let editorVersion = 0, editorActive = false;
@@ -120,7 +121,7 @@
     updateStorage(); return true;
   }
   function updateStorage() { $('storage-label').textContent = storageOK ? 'Tekst + billeder gemt lokalt' : 'Seneste ændringer er ikke gemt'; }
-  function resetRound(increment = true) { if (busy) return false; if (increment && !results.some(Boolean)) return false; if (increment) { window.dispatchEvent(new CustomEvent('neon:round-end', {detail:snapshot()})); round++; } selected = 0; next = 0; results = Array(6).fill(null); resultIndices = Array(6).fill(null); render(); return true; }
+  function resetRound(increment = true) { if (busy) return false; if (increment && !results.some(Boolean)) return false; if (increment) { window.dispatchEvent(new CustomEvent('neon:round-end', {detail:snapshot()})); round++; } locks = Array(6).fill(false); selected = 0; next = 0; results = Array(6).fill(null); resultIndices = Array(6).fill(null); render(); return true; }
   function setCount(count) { if (busy || !Number.isInteger(count) || count < 1 || count > config.dice.length) return; if (!save({...config, count})) return; resetRound(false); $('dice-count').children[count - 1].focus(); }
   function selectDie(index, source = 'list') { if (busy || index < 0 || index >= config.count) return; selected = index; next = index; render(); if (source === 'reel') document.querySelector(`[data-reel="${index}"]`)?.focus(); else $('results-list').children[index]?.focus(); }
 
@@ -164,12 +165,14 @@
     $('new-round').disabled=busy || !results.some(Boolean);
   }
 
-  function snapshot() { return JSON.parse(JSON.stringify({config,selected,next,busy,results,resultIndices,round})); }
+  function snapshot() { return JSON.parse(JSON.stringify({config,selected,next,busy,results,resultIndices,round,locks})); }
   function randomIndex(length) { const limit=Math.floor(4294967296/length)*length; const data=new Uint32Array(1); do { crypto.getRandomValues(data); } while(data[0]>=limit); return data[0]%length; }
   async function roll(index=next) {
+    if (paused) throw new Error('Sessionen er på pause.');
     if (busy) throw new Error('Et slag er allerede i gang.');
     if (document.querySelector('dialog[open]')) throw new Error('Luk den åbne dialog først.');
     if (!Number.isInteger(index)||index<0||index>=config.count) throw new Error('Vælg en aktiv terning.');
+    if (locks[index]) throw new Error('Lås terningen op, før du ruller igen.');
     const die=config.dice[index], outcome=randomIndex(die.faces.length);
     busy=true; selected=index; render();
     $('result-caption').textContent='SPÆNDINGEN STIGER';
@@ -177,7 +180,7 @@
     try {
       await boardUI.spin(index,outcome,faceView);
       results[index]=die.faces[outcome]; resultIndices[index]=outcome; next=index;
-      for(let offset=1;offset<=config.count;offset++){const candidate=(index+offset)%config.count;if(results[candidate]===null){next=candidate;break;}}
+      for(let offset=1;offset<=config.count;offset++){const candidate=(index+offset)%config.count;if(results[candidate]===null&&!locks[candidate]){next=candidate;break;}}
     } finally { busy=false; render(); }
     boardUI.reveal();
     window.dispatchEvent(new CustomEvent('neon:result', {detail:{index, outcome, face:results[index], round}}));
@@ -241,9 +244,20 @@
     get board(){return boardUI.mode;}, get effects(){return boardUI.effects;}, setEffects:value=>boardUI.setEffects(value), media: {...media, async put(id,blob){importImages.add(id);try{return await media.put(id,blob);}catch(error){importImages.delete(id);throw error;}}}, releaseImages(ids){for(const id of ids)importImages.delete(id);void cleanupUnusedImages();}, imageURL, prepareImage, randomIndex,
     setBoard(value){boardUI.setMode(value);},
     refresh:render, snapshot,
+    get paused(){return paused;}, set paused(value){paused=Boolean(value);},
+    toggleLock(index){if(busy||paused||!Number.isInteger(index)||index<0||index>=config.count||!results[index])return;locks[index]=!locks[index];if(locks[next]){const available=locks.findIndex((locked,i)=>i<config.count&&!locked);if(available>=0)next=available;}render();},
+    restore(state){
+      if(busy)throw new Error('Vent på det aktuelle kast.');
+      const c=state?.config;
+      if(!valid2(c)||!Array.isArray(state.results)||state.results.length!==6||!Array.isArray(state.resultIndices)||state.resultIndices.length!==6||!Number.isInteger(state.round)||state.round<1||state.round>100000||![state.selected,state.next].every(i=>Number.isInteger(i)&&i>=0&&i<c.count))throw new Error('Ugyldig gemt session.');
+      for(let i=0;i<c.count;i++){const n=state.resultIndices[i];if(n!==null&&(!Number.isInteger(n)||n<0||n>=c.dice[i].faces.length))throw new Error('Ugyldigt gemt resultat.');}
+      if(!save(c))throw new Error('Sessionen kunne ikke gemmes.');
+      selected=state.selected;next=state.next;round=state.round;resultIndices=state.resultIndices.slice();results=Array.from({length:6},(_,i)=>i<c.count&&resultIndices[i]!==null?c.dice[i].faces[resultIndices[i]]:null);locks=Array.from({length:6},(_,i)=>Boolean(state.locks?.[i]&&results[i]));render();
+    },
     apply(candidate){if(busy || document.querySelector('dialog[open]'))throw new Error('Afslut slaget eller luk dialogen først.');if(!save(candidate))throw new Error('Spillet kunne ikke gemmes.');round=1;resetRound(false);},
     reset(){resetRound();}, roll
   };
   if('serviceWorker'in navigator&&location.protocol!=='file:')navigator.serviceWorker.register('./sw.js').catch(()=>{});
   if(document.modelContext?.registerTool){const lifecycle=new AbortController();const register=tool=>{try{Promise.resolve(document.modelContext.registerTool(tool,{signal:lifecycle.signal})).catch(()=>{});}catch{}};register({name:'read_dice_game',description:'Read active dice, text/image face metadata and current round results.',inputSchema:{type:'object',properties:{},additionalProperties:false},annotations:{readOnlyHint:true,untrustedContentHint:true},execute:()=>({board:boardUI.mode,faceIndices:resultIndices.slice(0,config.count),count:config.count,dice:config.dice.slice(0,config.count).map(d=>({name:d.name,faces:d.faces.map(f=>({text:f.text,hasImage:Boolean(f.imageId)}))})),results:results.slice(0,config.count).map(r=>r?{text:r.text,hasImage:Boolean(r.imageId)}:null),round,busy})});register({name:'roll_one_die',description:'Roll one active die (1–6). Waits for the result.',inputSchema:{type:'object',properties:{die:{type:'integer',minimum:1,maximum:6}},required:['die'],additionalProperties:false},annotations:{readOnlyHint:false,untrustedContentHint:true},execute:async input=>{if(!input||!Number.isInteger(input.die))throw new Error('die must be an integer');if($('editor').open||$('help').open)throw new Error('Close the open dialog first.');return roll(input.die-1);}});window.addEventListener('pagehide',()=>lifecycle.abort(),{once:true});}
 })();
+

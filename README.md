@@ -1,6 +1,28 @@
-# Neon Terninger · Party & Erotik
+# Neon Terninger · Ultimate Fusion
 
-Dansk tablet- og mobilapp med fem sider. Udgives direkte fra `docs/` på GitHub Pages uden et byggetrin eller eksterne afhængigheder.
+Dansk offline-app til tablet, mobil og desktop med otte områder. Udgives direkte fra `docs/` på GitHub Pages uden et byggetrin eller eksterne afhængigheder.
+
+
+## Ultimate Fusion – denne version
+
+- Dark Velvet Neon-design med sidenavigation på desktop og touchmenu på mobil/tablet.
+- Lock & Roll, genrulning af ulåste terninger og hurtige skift mellem terninger, Lucky Spin og roulette.
+- Mystery Tiles med tilfældig afsløring fra den valgte ternings felter.
+- Path Board med 24–64 felter, individuelle spillerpositioner, bonus, timer, ekstra tur og videregang til roulette/mysterie.
+- Action Board med Nu/Senere/Finale, spillerfilter, drag/drop, tastaturvenlige fasevalg og flytteknapper, fortryd flytning, status, timere og guidet sekvens.
+- Felt-events i Neon Studio: resultat, board, timer eller næste roulette/Lucky Spin. Modulskift afventer spillerens tryk, så eventkæder ikke løber ukontrolleret.
+- Lokal genoptagelse af aktive terninger, låse, tur, board og resultater med billedsnapshots i IndexedDB `neon-fusion-v1`. De seneste 100 resultater gemmes. Timerstatus gemmes hvert femte sekund og ved pause; efter genåbning kan op til fem sekunder gentages.
+- JSON-eksport/import af en session med billeder; før import gemmes en lokal gendannelseskopi. Pakker eksporteres separat fra kataloget og importeres altid som nye kopier.
+- Skitsebog med farve, bredde, fortryd og WebP-eksport til det eksisterende mediebibliotek.
+- Design Lab med Calm, Neon, Cinematic og Chaos, Heat Meter, valgfri lyd/haptik, pauseord og pause i fuldskærm. Voksenpakker har en 18+-bekræftelse.
+
+Appen kræver ingen eksterne biblioteker eller build. Åbn via en lokal HTTP-server eller GitHub Pages for PWA/offline. En direkte `file://`-åbning giver ikke service worker.
+
+### Afgrænsning i forhold til konceptets langsigtede roadmap
+
+Dette er en spilbar Fusion-udgave bygget videre på den eksisterende app. Fri spiral/path-designer, vægtede kategorier, generelle kombinationsregler, flerlagsroulette, samtidige 3D-kast, adgangskodekryptering og en låst mediesamling er endnu ikke implementeret. Effektprofilerne bruger eksisterende browseranimationer, ikke en fysik-/shader-motor. Path Board bruger et fast feltmønster; Mystery Tiles bruger terningsfelter som kortpulje. Timerkort og billed-/tekstkort understøttes; der er ikke en selvstændig editor til alle foreslåede korttyper.
+
+Backup af en session indeholder det aktive spil og dets billeder, ikke hele mediebiblioteket. Eksportér andre spilpakker separat. Eksporterne er ikke krypterede. Ældre localStorage- og IndexedDB-lagre forbliver intakte.
 
 ## Vælg jeres spil
 
@@ -35,7 +57,7 @@ Billedredigering tilbyder originalformat, kvadrat, 16:9 og 3:4, zoom, vandret/lo
 - Lucky Spin: kabinet, neon-arkade eller minimal.
 - Roulette: klassisk neon, lysende ringe eller minimal.
 
-Et manuelt effektvalg går forud for enhedens reduceret-bevægelse-indstilling. Appen afspiller ikke lyd.
+Et manuelt effektvalg går forud for enhedens reduceret-bevægelse-indstilling. Lyd er valgfri og slås til i topbjælken.
 
 ## Data og opgradering
 
@@ -67,8 +89,12 @@ node tests/pack-regression.cjs
 node tests/board-regression.cjs
 node tests/studio-regression.cjs
 node tests/play-regression.cjs
+node tests/fusion-regression.cjs
 ```
 
-64 kontroller dækker validering, migration, billedimport og oprydning, gemmefejl, transaktionsfejl, editorer, effektvalg, navigation, pakkeåbning, rundeskift, genåbning af resultater, fuldskærm samt roulette-markørens position for alle felter på hjul med 2–50 felter. Pakke-testene omfatter også den tidligere implementation for at bevare dens regressionshistorik.
+74 automatiske kontroller dækker validering, migration, billedimport og oprydning, gemmefejl, transaktionsfejl, editorer, effektvalg, navigation, pakkeåbning, rundeskift, genåbning af resultater, fuldskærm samt roulette-markørens position for alle felter på hjul med 2–50 felter. Pakke-testene omfatter også den tidligere implementation for at bevare dens regressionshistorik.
 
 Browserkontrol: gem/genåbn pakker med seks hjul og 50 felter, skjulte felter og animeret popup, billedresultater, upload, beskæring, genbrug i designer, temaer/udseende efter genindlæsning samt mobil-/tablet-layout. Der er ikke udført en fysisk enhedstest på iPad/Android eller en udtømmende test af alle browseres lagerkvoter og offlineadfærd.
+
+
+Fusion-browserkontrol: pakkeåbning, kast → board, Lock & Roll, genindlæsning/genoptagelse, faseflytning/fortryd, timer/pause, sekvens, Mystery Tiles, Path Board, gemte timer-events og mobilbredde på 390 px. Ingen JavaScript-fejl blev observeret i disse forløb. Offline-cacheindhold kontrolleres automatisk; fysisk iPad-/Android-test og en fuld netværksafbrydelsestest er ikke udført.
